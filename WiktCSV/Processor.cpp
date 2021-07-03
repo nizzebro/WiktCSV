@@ -555,9 +555,12 @@ Processor::Element::TagType Processor::processContent() noexcept
 
     Element::TagType t;
 
-    while((t = parseTag()) == Element::TagType::kCData) 
+    while((t = parseTag()) >= Element::TagType::kCData) 
     {
-        if(!parseSeekEndOfCData()) return Element::TagType::kNone;
+        if(t == Element::TagType::kCData)
+        {
+            if(!parseSeekEndOfCData()) return Element::TagType::kNone;
+        }
         if (!parseSeekChar(char_iterator::is_eq('<'))) return Element::TagType::kNone;
     }
 
