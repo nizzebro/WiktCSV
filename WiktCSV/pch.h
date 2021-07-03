@@ -10,8 +10,10 @@
 #define PCH_H
 
 // TODO: add headers that you want to pre-compile here
-#include <string>
-#include <fstream>
-#include <iostream>
 #include <cassert>
+#include <algorithm>
+#include <string>
+#include <stdio.h>
+#include <vector>
+#include "simplified.h"
 #endif //PCH_H

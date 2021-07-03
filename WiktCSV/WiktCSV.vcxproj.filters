@@ -21,6 +21,12 @@
     <ClInclude Include="Processor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ProcessorRu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="simplified.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -30,6 +36,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessorRu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -1,28 +1,26 @@
 #include <pch.h>
 #include "Processor.h"
+#include <iostream>
 
 #define _CRT_SECURE_NO_WARNINGS
 
 using namespace std;
+using namespace wiktcsv;
 
-inline bool hasGraphs(const char* s)
-{
-  while(*s && *s <= 0x20) { ++s;}
-  return *s;
-}
 
 void printProgress (int nKb) {
-  cout << "\r'  Processed, kb:\t" << nKb;
+  std::cout << "\r'  Processed, kb:\t" << nKb/1024;
 }
+
 int main(int argc, char *argv[]) 
 {
   char path[260];
-  const char* p = "ruwiktionary.xml";
+  const char* p = "ruwiktionary.input";
   cout << "\n  This program converts XML dump of Russsian wiktionary to .csv files.\n";
   
   if(argc <= 1)
   {
-    cout << "\n  Path to the XML (ldefault: 'ruwiktionary.xml'):\n  " ;
+    cout << "\n  Path to the XML (ldefault: 'ruwiktionary.input'):\n  " ;
     cin.getline (&path[0], 260);
     if(path[0]) p = path;
   }
@@ -34,8 +32,8 @@ int main(int argc, char *argv[])
 
   cout << "\n  Wait... \n\n"; 
 
-  wiktcsv::Processor proc; 
-  if(proc.process(path, printProgress)) cout << "\n\n  Done\n" ;
-  else cout <<"\n\n  Error\n";
+  //Processor<LangCode::ru> proc; 
+  //if(proc.process(path, printProgress)) cout << "\n\n  Done\n" ;
+  //else cout <<"\n\n  Error\n";
   return 0;
 }
