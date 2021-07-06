@@ -279,26 +279,51 @@ using namespace wiktcsv;
 
 size_t Processor::read() noexcept
 {
-  size_t nRead = _fread_nolock(buffer, 1, bufferEnd - buffer, input);
+  size_t nRead = _fread_nolock(buffer, 1, cpos.end() - buffer, input);
   nReadTotal += nRead; 
-  if(nRead != (bufferEnd - buffer)) 
+  if(nRead != (cpos.end() - buffer)) 
   {
-      bufferEnd = buffer + nRead;
       if(ferror(input)) exitCode |= kErrRead;
-      
   }
-  cpos = buffer;
+  cpos.assign(buffer, buffer + nRead);
   return nRead;
 }
 
 // searches for char satisfying a condition;
 // increments position pointer, stops on the char found or eof 
 // returns the char found or 0: eof 
-char Processor::parseSeekChar(char_iterator::predicate pred) noexcept 
+template <typename P>
+char Processor::parseSeek(P pred) noexcept 
 {
-  do { if(cpos.seek_if(pred, bufferEnd)) return *cpos; }  
-  while(read());
-  return 0;
+    do { auto c = cpos.seek_if(pred); if(c) return c; }
+    while(read());
+    return 0;
+}
+
+// safely gets current char or 0 on eof; no increment
+char Processor::parsePeekc() noexcept
+{
+    auto c = cpos.peekc(); 
+    if(c) return c;
+    read(); 
+    return cpos.peekc(); 
+}
+
+// safely gets current char or 0 on eof;  increment
+char Processor::parseGetc() noexcept
+{
+    auto c = cpos.getc(); 
+    if(c) return c;
+    read(); 
+    return cpos.getc(); 
+}
+
+bool Processor::parseSkip() noexcept 
+{
+    auto b = cpos.skip();
+    if(b) return b;
+    read();
+    return cpos.skip();
 }
 
 
@@ -307,98 +332,63 @@ char Processor::parseSeekChar(char_iterator::predicate pred) noexcept
 
 bool Processor::parseSeekEndOfCData() noexcept
 {
-    while(parseSeekChar(char_iterator::is_eq(']')))
+    while(auto c = parseSeek(charsor::is_eq(']')))
     {
-        ++cpos; 
-        if (cpos == bufferEnd) {if(!read()) break;}
-        while(*cpos == ']') // skip potential "]]]]]...."
-        {
-            ++cpos; 
-            if(cpos == bufferEnd) {if (!read()) break;}
-            if(*cpos == '>') 
-            {
-                ++cpos; 
-                return true;
-            }
-        }  
+        cpos.skip();
+        while((c = parseGetc()) == ']') {} // skip potential "]]]]]...."
+        return c == '>';
     }
     return false;
 }
 
-
-
-
-// safely gets current char or 0 on eof; no increment
-char Processor::parsePickChar() noexcept
-{
-    if(cpos != bufferEnd || read())
-    {
-        return *cpos;
-    }
-    return 0;
-}
-
 // appends one char to tagBuffer and increments position;
 // returns the appended char or 0 on eof
-char Processor::parseAppendChar() noexcept {
+char Processor::parseAppendc() noexcept {
 
-    if(cpos != bufferEnd || read())
-    {
-        auto c = *cpos++;
-        tagBuffer. append(1, c);
-        return c;
-    }
-    return 0;
+    auto c = cpos.appendc(tagBuffer);
+    if(c) return c;
+    read();
+    return cpos.appendc(tagBuffer);
 }
 
-// appends chars to tagBuffer ending with a char that satisfies a condition
-// (appends this char either, and increments position)
-// returns that last char - or 0 when either eof or size limit is reached
-
-char Processor::parseAppendLineWith(char_iterator::predicate pred, size_t lim) noexcept
+// appends chars to tagBuffer until meets a char that satisfies a condition
+// appends that char either
+// returns that last char or 0 when either eof or size limit is reached
+template <typename P>
+char Processor::parseAppendEndingWith(P pred) noexcept
 {   
     do {
-        auto n = std::min((size_t)(bufferEnd - cpos), lim);
-        if (cpos.seek_append_if(pred, tagBuffer, cpos.get() + n)) 
+        auto c = cpos.seek_append_if(pred, tagBuffer);
+        if (c) 
         {
-            auto c = *cpos++;
-            return c;
+            tagBuffer += c;  cpos.skip();
         }
-        lim -= n; if(lim == 0) break;
-    } while (read());
+    } while (tagBuffer.size() < max_tag_length && read());
 
     return 0;
 }
 
-// appends chars to tagBuffer while equal to a c string 
-// returns the number of chars copied
-size_t Processor::parseAppendWhile(const char* cstr) noexcept
+
+size_t Processor::parseAppendSkipStr(const char* cstr) noexcept
 {   
     assert (*cstr);
-    size_t n = 0;
-    while (parsePickChar() == *cstr)
-    {
-        tagBuffer += *cstr;
-        ++cstr; ++cpos; ++n;
-    }   
+    auto n = 0;
+    do {
+        n += cpos.skipstr_append(cstr, tagBuffer);
+        if(!cpos.empty()) break;
+        cstr += n;
+     } while (read());  
     return n;
 }
 
-// appends chars to tagBuffer ending with "-->"
-// the curr. position should be next after "<--"
-// returns false on eof
-
+ 
 bool Processor::parseAppendRestOfComment() noexcept 
 {   
-    while(auto c = parseAppendLineWith(char_iterator::is_eq('-'))) 
+    while(auto c = parseAppendEndingWith(charsor::is_eq('-'))) 
     {
-        c = parseAppendChar();
-        while (c == '-') // skip potential "-----..."
-        {
-            c = parseAppendChar();
-        }
-        if (c == '>') return true;   
-        if(!c) break;
+        while ((c = parseAppendc())  == '-') {} // skip potential "-----..."
+        if (c == '>') return true; 
+        if (!c) break;
     } 
     return false;    
 }
@@ -409,14 +399,9 @@ bool Processor::parseAppendRestOfComment() noexcept
 
 bool Processor::parseAppendRestOfPI() noexcept 
 {   
-    // heap  = "(...<?)"
-    // this routine is called either from processTag()->processPI(), to handle a separate PI, 
-    // or, from processDecl(), to deal with nested PI's inside a DTD.
-    // search for "?>"
-    while (auto c = parseAppendLineWith(char_iterator::is_eq('?')))
+    while (auto c = parseAppendEndingWith(charsor::is_eq('?')))
     {
-        c = parseAppendChar(); 
-        if (c == '>') return true;
+        if ((c = parseAppendc()) == '>') return true;
         if(!c) break;
     }
     return false;    
@@ -429,13 +414,13 @@ bool Processor::parseAppendRestOfPI() noexcept
 Processor::Element::TagType Processor::parseTag() noexcept 
 {
 
-   tagBuffer = '<'; 
-   ++cpos;
-   auto c = parseAppendChar();
+   parseAppendc(); // '<'; 
+   auto c = parseAppendc();
    if(c == '/') // End-tag: "</" (any chars except '>') '>' 
    {
-       if(parseAppendLineWith(char_iterator::is_eq('>')))
+       if(parseAppendEndingWith(charsor::is_eq('>')))
            return Element::TagType::kETag;
+
    }
    else if(c == '?') // PI (Processor Instruction): "<?" (any chars except "?>") "?>" 
    {
@@ -450,45 +435,55 @@ Processor::Element::TagType Processor::parseTag() noexcept
 
        // check if it is a comment, CData or DTD
 
-        auto c = parsePickChar(); // lookup to avoid removing next '<' from queque (can be DTD's nested elements)
+        auto c = parsePeekc(); // lookup to avoid removing next '<' from queque (can be DTD's nested elements)
 
         if (c == '-') // "<!-" check for a comment
         {
-            ++cpos;
-            c = parsePickChar(); // lookup again
+            parseSkip();
+            c = parsePeekc(); // lookup again
             if (c == '-') // "<!--" yup, comment
             {
-                ++cpos;
+                parseSkip();
                 if(parseAppendRestOfComment()) 
                     return Element::TagType::kComment;
             }
         } 
-        else if(c == '[' && xml.level()) // CDATA should not appear outside an element
+        else if(c == '[') // load all cdata in buffer
         {
-            ++cpos;
-            if(parseAppendWhile("CDATA[") == sizeof("CDATA["))
-                return  Element::TagType::kCData; 
+            if(parseAppendSkipStr("CDATA[") == sizeof("CDATA["))
+            {
+                if (!xml.keepCDataTags) tagBuffer.clear();
+                while (parseAppendEndingWith(charsor::is_eq(']')))
+                {
+                    if(parseAppendSkipStr("]>") == sizeof("]>"))
+                    {
+                        if (!xml.keepCDataTags) tagBuffer.erase(tagBuffer.length() - 3);
+                        return  Element::TagType::kCData; 
+                    }
+                }
+                
+            }
+                
         }
         else
         {
             int iNested = 1;        // count matching '< >'
-            while (c = parseAppendLineWith (char_iterator::is_of(char_iterator::is_eq('<'),
-                char_iterator::is_eq('>'))))
+            while (c = parseAppendEndingWith (charsor::is_of( {'<','>'})))
             {
                 if (c == '<')  // "...<"
                 {   
-                    c = parseAppendChar(); 
+                    c = parseAppendc(); 
 
                     if(c == '!') // "...<!"
                     {
-                        auto c = parsePickChar();
+                        auto c = parsePeekc();
                         if(c == '-') // "...<!-" nested comment?
                         {
-                            ++cpos;
-                            c = parsePickChar(); 
+                            parseSkip();
+                            c = parsePeekc(); 
                             if (c == '-') // "...<!--" yup, nested comment
                             {
-                                ++cpos;
+                                parseSkip();
                                 if(!parseAppendRestOfComment()) break;   
                             }
                         } 
@@ -514,84 +509,68 @@ Processor::Element::TagType Processor::parseTag() noexcept
    } 
    else if(c)
    {
-        if(parseAppendLineWith(char_iterator::is_eq('>')))
-        {
-            return tagBuffer[tagBuffer.size()-1] == '/'? 
-                Element::TagType::kSCTag : Element::TagType::kSTag;
-        }
+        if(parseAppendEndingWith(charsor::is_eq('>'))) return Element::TagType::kSTag;
    }
 
     return  Element::TagType::kNone;   
-
 }
 
 
-// calls contents handler; checks if the next tag was parsed from within handler,
-// if not - skips to the next tag and parses it; returns the parsed tag type.
 
-Processor::Element::TagType Processor::processContent() noexcept 
+void Processor::processContent(bool cData) noexcept 
 {
     xml.contentAvailable = true;
     onContent(xml);
+    xml.cData = cData;
+    if (cData) cdpos = tagBuffer;
 
-    // test if next tag is already parsed by getters 
-
-    if(!xml.contentAvailable) return xml.nextTagType;
-
-    // not parsed: skip to the next tag and parse it
-
-    xml.contentAvailable = false; // reset; this prevents data access from callbacks
-
-    if(xml.insideCData)
+    if (xml.contentAvailable)
     {
-        if(!parseSeekEndOfCData()) return Element::TagType::kNone;
-        xml.insideCData = false;
+        parseSeek(charsor::is_eq('<'));
+        xml.contentAvailable = false;
     }
-
-    if (!parseSeekChar(char_iterator::is_eq('<'))) return Element::TagType::kNone;
-
-
-    // parse tag and skip all possible cdata's to prevent recursion in processTag()
-
-    Element::TagType t;
-
-    while((t = parseTag()) >= Element::TagType::kCData) 
-    {
-        if(t == Element::TagType::kCData)
-        {
-            if(!parseSeekEndOfCData()) return Element::TagType::kNone;
-        }
-        if (!parseSeekChar(char_iterator::is_eq('<'))) return Element::TagType::kNone;
-    }
-
-    return  t;
 
 }
 
+void Processor::processSTag() noexcept
+{
+    bool isSelfClosing = tagBuffer[tagBuffer.size() - 1] == '/';
+    xml.path.push_back(STag(std::move(tagBuffer)));
+    onPrefix(xml, isSelfClosing);
+    if(isSelfClosing) xml.path.pop_back();
+}
+
+
+void Processor::processETag() noexcept
+{
+    if(xml.level())
+    {
+        xml.endTag = std::move(tagBuffer);
+        onSuffix(xml);
+        xml.path.pop_back();
+    }
+}
+ 
 bool Processor::processTag(Processor::Element::TagType t) noexcept 
 {
     switch (t)
     {
-        case Element::TagType::kETag:
-            xml.endTag = std::move(tagBuffer);
-            onSuffix(xml);
-            xml.path.pop_back();
-            return true;
         case Element::TagType::kSTag: 
-            return processNextElement();
-        case Element::TagType::kSCTag: 
-            processSelfClosingElement(); 
-            return true; 
-        case Element::TagType::kCData:
-            xml.insideCData = true;
-            return processTag(processContent()); 
+            processSTag();
+            return true;
+        case Element::TagType::kETag:
+            processETag();
+            return true;
+        case Element::TagType::kCData: 
+            processContent(true);
+            return true;
         case Element::TagType::kPI: 
             onPI(tagBuffer, xml.path); 
             return true; 
         case Element::TagType::kComment: 
             onComment(tagBuffer, xml.path); 
             return true; 
-        case Element::TagType::kDTD: // shuld not appear here but anyway
+        case Element::TagType::kDTD: // should not appear here but anyway
             onDTD(tagBuffer);
             return true; 
     }
@@ -600,52 +579,27 @@ bool Processor::processTag(Processor::Element::TagType t) noexcept
 }
 
 
-bool  Processor::processNextElement() noexcept 
+bool  Processor::processNextEnity() noexcept 
 {
-    xml.path.push_back(STag(std::move(tagBuffer)));
-    onPrefix(xml, false);
+    auto t = xml.parsedTagType;
 
-    while(auto c = parseSeekChar(char_iterator::is_gt(' ')))
+    if(t != Element::TagType::kNone) 
     {
-        return processTag((c == '<'? parseTag() : processContent()));
-    } 
-
-    return false;
-}
+        xml.parsedTagType = Element::TagType::kNone;
+        return processTag(t);
+    }
 
 
-void Processor::processSelfClosingElement() noexcept
-{
-    xml.path.push_back(STag(std::move(tagBuffer)));
-    onPrefix(xml, true);
-    xml.path.pop_back();
-}
+    auto c = parseSeek(charsor::is_gt(' '));
 
-bool Processor::processNextTopLevelEnitity() noexcept
-{
-    auto c =parseSeekChar(char_iterator::is_eq('<'));
-
-    if(c) 
-    {
-        switch (Element::TagType t = parseTag()) 
-        {    
-            case Element::TagType::kDTD:
-                onDTD(tagBuffer); return true;   
-            case Element::TagType::kPI: 
-                onPI(tagBuffer, xml.path);  return true;  
-            case Element::TagType::kSTag: 
-                return processNextElement();
-            case Element::TagType::kSCTag: 
-                processSelfClosingElement(); return true;  
-            case Element::TagType::kComment: 
-                onComment(tagBuffer, xml.path);  return true;  
-        }
-        exitCode |= kErrData;
+    if(c == '<') return processTag(parseTag());
+    if(c) {
+        processContent(false);
+        return true;
     }
 
     return false;
 }
-
 
 int Processor::process(const char* path, size_t bufferSize) noexcept
 {
@@ -656,9 +610,10 @@ int Processor::process(const char* path, size_t bufferSize) noexcept
     {
         bufferSize = (bufferSize + (buffer_gran - 1)) & (~(buffer_gran - 1));
         buffer = new char [bufferSize];
-        bufferEnd = buffer + bufferSize;
-        cpos = buffer;
-        while(processNextTopLevelEnitity()) {}      
+        if(read()) // cpos assignment is inside read()
+        {
+            while(processNextEnity()) {}  
+        }
         delete [] buffer;
         xml = {};
     }
@@ -669,34 +624,30 @@ int Processor::process(const char* path, size_t bufferSize) noexcept
 
 std::string_view Processor::STag::getName() const noexcept
 {
-    const char* p = data() + 1;
-    char_iterator it(p);
-    it.seek(' ', data() + size());
+    auto p = data() + 1;
+    charsor it(p, data() + size());
+    it.seek_if(charsor::is_of({' ','>','/'}));
     return std::string_view(p, it.get() - p);
 }
 
 std::vector<Processor::Attribute> Processor::STag::getAttributes() const noexcept
 {
-    const char* p = data() + 1;
-    char_iterator it(p);
+    auto p = data() + 1;
+    charsor it(p, data() + size());
     std::vector<Attribute> v;
-    const char* end = data() + size();
-    if(it.seek(' ', end)) 
+    while(it.seek(' '))
     {
-        ++it; 
-        for(;;)
-        {
-            p = it.get();
-            if(!it.seek('=', end)) break;
-            std::string_view name(p, it.get() - p); 
-            ++it; if(it == end) break;
-            if(*it != '"') break;
-            ++it; 
-            if(!it.seek('"', end)) break;
-            std::string_view value(p, it.get() - p); 
-            ++it; 
-            v.push_back(Attribute{name, value});
-        }
+        it.skip();
+        p = it.get();
+        if(!it.seek('=')) break;
+        std::string_view name(p, it.get() - p); 
+        it.skip();
+        if(it.getc() != '"') break;
+        p = it.get();
+        if(!it.seek('"')) break;
+        std::string_view value(p, it.get() - p); 
+        it.skip(); 
+        v.push_back(Attribute{name, value});
     }
     return std::move(v);
 }
@@ -713,69 +664,36 @@ const std::string & Processor::Element::getEndTagString() noexcept
     return endTag;
 }
 
-char wiktcsv::Processor::getChar() noexcept
+char Processor::getChar() noexcept
 {
     if(xml.contentAvailable)
     {
         
-        if(!xml.insideCData)
+        if(!xml.cData)
         {
-            auto c = parsePickChar();
+            auto c = parsePeekc();
 
-            if(c != '<') 
-            {
-                ++cpos;
-                return c;
-            }
+            if (c != '<') return parseGetc();
+           
             auto t = parseTag();
             if(t == Element::TagType::kCData)
             {
-                xml.insideCData = true;
-                return getChar(); // try once again
+                xml.cData = true;
+                cdpos = tagBuffer;
+                return getChar();
             }
                 
             xml.contentAvailable = false; // end of block
-            xml.nextTagType = t;    // save 
+            xml.parsedTagType = t;    // save 
 
             return 0;
         }
         else
         {
-            if(xml.cDataBracket)
-            {
-                xml.cDataBracket = false;
-                return ']';
-            }
-
-            auto c = parsePickChar();
-            ++cpos;
-            
-            if(c != ']') return c;
-            
-            c = parsePickChar(); // next after "]"
-            
-            if(c != ']') return ']'; 
-
-            ++cpos;  
-            c = parsePickChar(); // next after "]]"
-            if(c != '>') 
-            {
-                xml.cDataBracket = true;
-                return ']';
-            }
-            ++cpos;   // to next after "]]>"
-           
-            
-            auto t = parseTag();
-            if(t != Element::TagType::kCData)
-            {
-                xml.insideCData = false;
-                xml.contentAvailable = false; // end of block
-                xml.nextTagType = t;    // save 
-                return 0;          
-            }
-                
-            return getChar(); // one more cdata: try once again  
+           auto c = cdpos.getc();
+           if (c) return c;
+           xml.cData = false;
+           return getChar();
         }
     }
     return 0;

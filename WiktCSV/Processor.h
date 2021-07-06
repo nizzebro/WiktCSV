@@ -68,24 +68,20 @@ class Processor {
         std::string endTag;  // lazy initialization
 
         // settings TODO
-        bool ignoreCurrentNested = false; // skip sub-elements of the current one 
-        bool ignoreNestedComments = false; // skip comments inside any tags
-        bool ignoreNestedPIs = false;   // skip PI-s inside any tags
         bool keepCDataTags = false;     // do not erase "<![CDATA"
         bool keepCharReferences = false; // do not replace "&#xxx" with actual values
         // TODO: the same for token references; for now, nothing related is implemented
 
         // parsed tag type; set by data getters when they reach the next tag and parse it
         // !!! The order matters !!! to check if >= kCData to skip subitems
-        enum TagType{ kNone, kSTag, kSCTag, kETag, kCData, kComment, kPI, kDTD};
-        TagType nextTagType = TagType::kNone;  
+        enum TagType{ kNone, kSTag, kETag, kCData, kComment, kPI, kDTD};
+        TagType parsedTagType = TagType::kNone;  
 
         // set only when passing through contents; prevents access to buffer from other callbacks
         bool contentAvailable = false;         
         // set while passing through cData; to take its terminator into account
-        bool insideCData = false;   
-        bool cDataBracket = false; //  ']' flag for getChar() in cdata
-        
+        bool cData = false;   
+
     };
     
 
@@ -98,31 +94,34 @@ class Processor {
     
     FILE* input;
     char* buffer;   
-    const char* bufferEnd;
-    char_iterator cpos;      // read position
+    charsor cpos;      // read position
     std::string tagBuffer;     // for tag parsing
     
     size_t exitCode;
     std::size_t nReadTotal;
 
     Element xml = {};       
-    char* contentOrBufferEnd; // used by content getters
+    charsor cdpos; // cdata pos
+    std::string cDataBuffer;
 
     size_t read() noexcept;
-    char parseSeekChar(char_iterator::predicate pred) noexcept;
+    template <typename P>
+    char parseSeek(P pred) noexcept;
+    char parseGetc() noexcept;
+    bool parseSkip() noexcept;
     bool parseSeekEndOfCData() noexcept;
-    char parsePickChar() noexcept;
-    char parseAppendChar() noexcept;
-    char parseAppendLineWith(char_iterator::predicate pred, size_t lim = max_tag_length) noexcept;
-    size_t parseAppendWhile(const char* cstr) noexcept;
+    char parsePeekc() noexcept;
+    char parseAppendc() noexcept;
+    template <typename P>
+    char parseAppendEndingWith(P pred) noexcept;
+    size_t parseAppendSkipStr(const char* cstr) noexcept;
     bool parseAppendRestOfPI() noexcept;
     bool parseAppendRestOfComment() noexcept;
     Element::TagType parseTag() noexcept;
-    Element::TagType processContent() noexcept;
+    void processContent(bool cData) noexcept;
+    void processSTag() noexcept;
+    void processETag() noexcept;
     bool processTag(Element::TagType t) noexcept;
-    bool processNextElement() noexcept;
-    void processSelfClosingElement()  noexcept;
-    bool processNextTopLevelEnitity() noexcept;
 
 
     protected:
@@ -130,14 +129,13 @@ class Processor {
 
     /** Set global options (can be changed during processing */
 
-    /** Skip comments inside content, to prevent extra onContents() calls? (default = false) */
-    void setIgnoreNestedComments(bool ignore) {xml.ignoreNestedComments = ignore;}
-    /** Skip PI inside content, to prevent extra onContents() calls? (default = false) */
-    void setIgnoreNestedPIs(bool ignore) {xml.ignoreNestedPIs = ignore;}
+   
     /** Should "<![CDATA[", "]]>" be kept (default: false, remove them) */
     void setKeepCDataTags(bool keep) {xml.keepCDataTags = keep;}
     /** Should "&#xxx>" be kept (default: false, replace them with actual values) */
     void setKeepCharReferences(bool keep) {xml.keepCharReferences = keep;}
+
+    bool processNextEnity() noexcept;
 
     /** Starts processing, calls virtual handlers in a loop and returns ExitCode. */
     int process(const char* path, std::size_t bufferSize = default_buffer_size) noexcept;
