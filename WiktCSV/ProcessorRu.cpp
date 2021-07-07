@@ -38,5 +38,18 @@ using namespace wiktcsv;
   //  }
   //}
 //}
+#include <iostream>
+void wiktcsv::ProcessorRu::onPrefix(const Element & elem, bool isSelfClosing)
+{
+    auto s = elem.getName();
+    std::cout. write(s.data(), s.size());
+    std::cout << "\n";
+}
 
+void wiktcsv::ProcessorRu::onContent(const Element & elem)
+{
+}
 
+void wiktcsv::ProcessorRu::onSuffix(const Element & elem)
+{
+}

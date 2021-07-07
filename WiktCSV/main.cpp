@@ -1,5 +1,5 @@
 #include <pch.h>
-#include "Processor.h"
+#include "ProcessorRu.h"
 #include <iostream>
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -8,13 +8,28 @@ using namespace std;
 using namespace wiktcsv;
 
 
-void printProgress (int nKb) {
-  std::cout << "\r'  Processed, kb:\t" << nKb/1024;
-}
+//void printProgress (int nKb) {
+//  std::cout << "\r'  Processed, kb:\t" << nKb/1024;
+//}
 
 int main(int argc, char *argv[]) 
 {
-  char path[260];
+
+    ProcessorRu p;
+    p.process("D:\\Projects\\Wiktionary\\sample.xml");
+
+  return 0;
+}
+
+
+
+  //Processor<LangCode::ru> proc; 
+  //if(proc.process(path, printProgress)) cout << "\n\n  Done\n" ;
+  //else cout <<"\n\n  Error\n";
+
+
+
+ /* char path[260];
   const char* p = "ruwiktionary.input";
   cout << "\n  This program converts XML dump of Russsian wiktionary to .csv files.\n";
   
@@ -30,10 +45,4 @@ int main(int argc, char *argv[])
     cout << "  " << p << "\n";
   }
 
-  cout << "\n  Wait... \n\n"; 
-
-  //Processor<LangCode::ru> proc; 
-  //if(proc.process(path, printProgress)) cout << "\n\n  Done\n" ;
-  //else cout <<"\n\n  Error\n";
-  return 0;
-}
+  cout << "\n  Wait... \n\n"; */

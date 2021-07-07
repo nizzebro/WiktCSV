@@ -1,6 +1,11 @@
 #pragma once
 
-#include "pch.h"
+#include <cassert>
+#include <algorithm>
+#include <string>
+#include <stdio.h>
+#include <vector>
+#include "simplified.h"
 
 namespace wiktcsv {
 
@@ -41,6 +46,7 @@ class Processor {
 
     class Element
     { 
+        public:
         // this structure is only needed to 1) provide better semantics and scope for callbacks;
         // 2) put together those variables which have to be zeroed between two calls to process().
 

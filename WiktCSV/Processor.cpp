@@ -332,7 +332,7 @@ bool Processor::parseSkip() noexcept
 
 bool Processor::parseSeekEndOfCData() noexcept
 {
-    while(auto c = parseSeek(charsor::is_eq(']')))
+    while(auto c = parseSeek(charsor::eq<']'>))
     {
         cpos.skip();
         while((c = parseGetc()) == ']') {} // skip potential "]]]]]...."
@@ -361,7 +361,9 @@ char Processor::parseAppendEndingWith(P pred) noexcept
         auto c = cpos.seek_append_if(pred, tagBuffer);
         if (c) 
         {
-            tagBuffer += c;  cpos.skip();
+            tagBuffer += c;  
+            cpos.skip();
+            return c;
         }
     } while (tagBuffer.size() < max_tag_length && read());
 
@@ -384,7 +386,7 @@ size_t Processor::parseAppendSkipStr(const char* cstr) noexcept
  
 bool Processor::parseAppendRestOfComment() noexcept 
 {   
-    while(auto c = parseAppendEndingWith(charsor::is_eq('-'))) 
+    while(auto c = parseAppendEndingWith(charsor::eq<'-'>)) 
     {
         while ((c = parseAppendc())  == '-') {} // skip potential "-----..."
         if (c == '>') return true; 
@@ -399,7 +401,7 @@ bool Processor::parseAppendRestOfComment() noexcept
 
 bool Processor::parseAppendRestOfPI() noexcept 
 {   
-    while (auto c = parseAppendEndingWith(charsor::is_eq('?')))
+    while (auto c = parseAppendEndingWith(charsor::eq<'?'>))
     {
         if ((c = parseAppendc()) == '>') return true;
         if(!c) break;
@@ -413,12 +415,12 @@ bool Processor::parseAppendRestOfPI() noexcept
 
 Processor::Element::TagType Processor::parseTag() noexcept 
 {
-
+   tagBuffer.clear();
    parseAppendc(); // '<'; 
    auto c = parseAppendc();
    if(c == '/') // End-tag: "</" (any chars except '>') '>' 
    {
-       if(parseAppendEndingWith(charsor::is_eq('>')))
+       if(parseAppendEndingWith(charsor::eq<'>'>))
            return Element::TagType::kETag;
 
    }
@@ -453,7 +455,7 @@ Processor::Element::TagType Processor::parseTag() noexcept
             if(parseAppendSkipStr("CDATA[") == sizeof("CDATA["))
             {
                 if (!xml.keepCDataTags) tagBuffer.clear();
-                while (parseAppendEndingWith(charsor::is_eq(']')))
+                while (parseAppendEndingWith(charsor::eq<']'>))
                 {
                     if(parseAppendSkipStr("]>") == sizeof("]>"))
                     {
@@ -468,7 +470,7 @@ Processor::Element::TagType Processor::parseTag() noexcept
         else
         {
             int iNested = 1;        // count matching '< >'
-            while (c = parseAppendEndingWith (charsor::is_of( {'<','>'})))
+            while (c = parseAppendEndingWith (charsor::eq<'<','>'>))
             {
                 if (c == '<')  // "...<"
                 {   
@@ -509,7 +511,7 @@ Processor::Element::TagType Processor::parseTag() noexcept
    } 
    else if(c)
    {
-        if(parseAppendEndingWith(charsor::is_eq('>'))) return Element::TagType::kSTag;
+        if(parseAppendEndingWith(charsor::eq<'>'>)) return Element::TagType::kSTag;
    }
 
     return  Element::TagType::kNone;   
@@ -526,7 +528,7 @@ void Processor::processContent(bool cData) noexcept
 
     if (xml.contentAvailable)
     {
-        parseSeek(charsor::is_eq('<'));
+        parseSeek(charsor::eq<'<'>);
         xml.contentAvailable = false;
     }
 
@@ -590,7 +592,7 @@ bool  Processor::processNextEnity() noexcept
     }
 
 
-    auto c = parseSeek(charsor::is_gt(' '));
+    auto c = parseSeek(charsor::gt<' '>);
 
     if(c == '<') return processTag(parseTag());
     if(c) {
@@ -606,10 +608,11 @@ int Processor::process(const char* path, size_t bufferSize) noexcept
     nReadTotal = 0;
     input = fopen(path, "rb");
     exitCode = setvbuf(input,  nullptr, _IONBF, 0 ) == 0 ? kOk : kErrOpen;
-    if(exitCode) 
+    if(exitCode == kOk) 
     {
         bufferSize = (bufferSize + (buffer_gran - 1)) & (~(buffer_gran - 1));
         buffer = new char [bufferSize];
+        cpos.assign(buffer, buffer + bufferSize);
         if(read()) // cpos assignment is inside read()
         {
             while(processNextEnity()) {}  
@@ -626,7 +629,7 @@ std::string_view Processor::STag::getName() const noexcept
 {
     auto p = data() + 1;
     charsor it(p, data() + size());
-    it.seek_if(charsor::is_of({' ','>','/'}));
+    it.seek_if(charsor::eq<' ','>','/'>);
     return std::string_view(p, it.get() - p);
 }
 
