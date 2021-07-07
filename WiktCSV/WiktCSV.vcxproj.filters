@@ -18,27 +18,27 @@
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Processor.h">
+    <ClInclude Include="..\..\..\XmlParser\charsor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ProcessorRu.h">
+    <ClInclude Include="..\..\..\XmlParser\processor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="simplified.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="processor_ru.h">
+      <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Processor.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ProcessorRu.cpp">
+    <ClCompile Include="..\..\..\XmlParser\processor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="processor_ru.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

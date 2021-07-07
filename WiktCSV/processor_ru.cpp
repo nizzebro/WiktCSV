@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "ProcessorRu.h"
+#include "processor_ru.h"
 #include <cctype>
 using namespace wiktcsv;
 
@@ -39,17 +39,17 @@ using namespace wiktcsv;
   //}
 //}
 #include <iostream>
-void wiktcsv::ProcessorRu::onPrefix(const Element & elem, bool isSelfClosing)
+void ProcessorRu::onPrefix(const Element & elem, bool isSelfClosing)
 {
     auto s = elem.getName();
     std::cout. write(s.data(), s.size());
     std::cout << "\n";
 }
 
-void wiktcsv::ProcessorRu::onContent(const Element & elem)
+void ProcessorRu::onContent(const Element & elem)
 {
 }
 
-void wiktcsv::ProcessorRu::onSuffix(const Element & elem)
+void ProcessorRu::onSuffix(const Element & elem)
 {
 }
