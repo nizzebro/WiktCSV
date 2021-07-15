@@ -5,6 +5,55 @@ using namespace wiktcsv;
 
 //const char* const ProcessorBase::outputFileNames[nOfstreams] = {"pages.csv","headers.csv","lines.csv","rem.input"};
 
+
+#include <iostream>/*
+void ProcessorRu::onPrefix(const Element & elem, bool isSelfClosing)
+{
+    if(selfClosing) return;
+    auto s = elem.getName();
+    if (s == "page") 
+    {
+        insidePage = true;
+        return;
+    }
+    
+    if(s == "title")
+    {
+        charser it(s);
+        if (it.seek(':')) return;
+        title = s;
+        return;
+    }
+    if(s == "ns")
+    {
+        title = s;
+        return;
+    }
+
+    std::cout. write(s.data(), s.size());
+    std::cout << "\n";
+}
+
+void ProcessorRu::onContent(const Element & elem)
+{
+    if (!insidePage) return;
+
+
+
+
+}
+
+void ProcessorRu::onSuffix(const Element & elem)
+{
+    auto s = elem.getName();
+    if (s == "page") 
+    {
+        insidePage = false;
+        return;
+    }
+}*/
+
+
 //void wiktcsv::ProcessorRu::process(const StringView& s)
 //{
   //std::string title;
@@ -38,18 +87,7 @@ using namespace wiktcsv;
   //  }
   //}
 //}
-#include <iostream>
-void ProcessorRu::onPrefix(const Element & elem, bool isSelfClosing)
-{
-    auto s = elem.getName();
-    std::cout. write(s.data(), s.size());
-    std::cout << "\n";
-}
 
-void ProcessorRu::onContent(const Element & elem)
-{
-}
-
-void ProcessorRu::onSuffix(const Element & elem)
+void wiktcsv::ProcessorRu::process()
 {
 }

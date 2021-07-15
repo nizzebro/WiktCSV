@@ -10,19 +10,15 @@ namespace wiktcsv {
 
 class ProcessorRu: public XmlParser
 {
+    bool insidePage = false;
+    bool isArticle = false;
+    std::string id;
+    std::string title;
 
-
-void ProcessorRu::onPrefix(const Element & elem, bool isSelfClosing);
-void ProcessorRu::onContent(const Element & elem);
-void ProcessorRu::onSuffix(const Element & elem);
-
-virtual void onDTD(const std::string& text){}
-virtual void onPI(const std::string& text, const std::vector<STag>& path) {}
-virtual void onComment(const std::string& text, const std::vector<STag>& path) {}
-
+    virtual void process();
 
     public:
-    using XmlParser::process;
+    //using XmlParser::openFile;
 
 };
 

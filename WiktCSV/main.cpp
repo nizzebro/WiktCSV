@@ -1,4 +1,3 @@
-#include <pch.h>
 #include "processor_ru.h"
 #include <iostream>
 
@@ -16,7 +15,7 @@ int main(int argc, char *argv[])
 {
 
     ProcessorRu p;
-    p.process("D:\\Projects\\Wiktionary\\sample.xml");
+    //p.openFile("D:\\Projects\\Wiktionary\\sample.xml");
 
   return 0;
 }
