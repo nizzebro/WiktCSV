@@ -8,17 +8,14 @@ namespace wiktcsv {
 
 
 
-class ProcessorRu: public XmlParser
+class ProcessorRu: protected XmlParser
 {
-    bool insidePage = false;
-    bool isArticle = false;
-    std::string id;
-    std::string title;
-
+    public:
+    using XmlParser::process;
+    protected:
     virtual void process();
 
     public:
-    //using XmlParser::openFile;
 
 };
 
