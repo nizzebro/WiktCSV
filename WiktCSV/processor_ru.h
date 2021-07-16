@@ -7,17 +7,14 @@
 namespace wiktcsv {
 
 
-
 class ProcessorRu: protected XmlParser
 {
     public:
-    using XmlParser::process;
+    void process(const char* path) noexcept;
     protected:
     virtual void process();
-
-    public:
-
 };
 
 
 };
+
