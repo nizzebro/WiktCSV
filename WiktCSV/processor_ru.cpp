@@ -15,23 +15,36 @@ bool ProcessorRu::process(const char* fileName) noexcept
     while (n && *p != '\\' && *p != '/') {--p; --n; }
     path.append(fileName, n);
     path += '\0';
-    if(writer.openFiles(path.data(), {"pages.csv","headers.csv","lines.csv","rem.input"}))
-    {
-        bool b = XmlParser::process(path);
-        writer.closeFiles();
-        return b;
-    }
-    return false;
-}
+    if(!writer.openFiles(path.data(), 
+        {"pages.csv","headers.csv","lines.csv","rem.xml"})) return false;
 
 
-void ProcessorRu::process()
-{
+    XmlParser::openFile(fileName);
 
-    while(next())
-    {
+      while(next())
+      {
+        if(isElement() && getName() == "page")
+        {
+          for(auto & a : getAttributes())
+          { 
+              std::cout << a.name << '=' << a.value << '\n';
+          }
 
-    }
+          auto i = level();
+          while(next(i))
+          {
+              if(isText() && getName() == "text")
+              {
+                std::cout << "TEXT OF <PAGE>" << '\n' ;
+              }
+          }
+          std::cout << " </page> is reached";
+        }
+      }
+
+      XmlParser::closeFile();
 
 
+
+    return true;
 }

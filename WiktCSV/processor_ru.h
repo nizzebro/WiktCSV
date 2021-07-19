@@ -13,7 +13,6 @@ class ProcessorRu: XmlParser
     bool process(const char* fileName) noexcept;
     protected:
     private:
-    virtual void process();
     XmlParser::FileWriter writer;
 };
 
