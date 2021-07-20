@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 {
 
     ProcessorRu p;
-    p.process("D:\\Projects\\Wiktionary\\sample.xml");
+    p.process("D:\\Projects\\Wiktionary\\", "sample.xml");
 
   return 0;
 }
