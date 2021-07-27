@@ -45,7 +45,7 @@ class ProcessorRu: XmlParser, XmlParser::FileWriter
 	{ "words.csv","syntax.csv","etimology.csv","phrases.csv","sayings.csv", "meanings.csv",
 		"category.csv","rem.xml" };
 
-	void processText(std::size_t idWord, std::string_view idPage, std::string_view title) noexcept;
+	void processText(std::size_t& idWord, std::string_view idPage, std::string_view title) noexcept;
 
 	XmlParser::FileWriter& ofstreams = static_cast<XmlParser::FileWriter&>(*this);
 

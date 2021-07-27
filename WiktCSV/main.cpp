@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 {
 
     ProcessorRu p;
-    p.process("D:\\Projects\\Wiktionary\\", "ruwiktionary-20210520-pages-articles-multistream.xml");
+    p.process("D:\\Projects\\Wiktionary\\", "ruwiktionary-20210520-pages-articles-multistream.xml"); //
 
   return 0;
 }

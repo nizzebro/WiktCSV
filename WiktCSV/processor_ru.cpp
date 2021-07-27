@@ -23,7 +23,7 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
 	std::string rem;    // accumulator for special pages
 	std::size_t idWord = 0;
 
-	std::cout << "Processed pages/bytes:";
+	std::cout << "Processed pages/Mb:";
 	std::cout << '\n';
 
     while(next()) // for each item
@@ -56,9 +56,13 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
                     else if (name == "redirect") break;     // skip any redirecting stub pages
 					else if (name == "text")
 					{
-						processText(idWord++, idPage, title); /// text always goes last; we have all vars collected
-						std::cout << "\r                       ";
-						std::cout << '\r' << idWord << '\t' << (getFilePos());
+						processText(idWord, idPage, title); /// text always goes last; we have all vars collected
+						if ((idWord & 0xFF) == 0) // each 256 pages
+						{
+							std::cout << "\r                       ";
+							std::cout << '\r' << idWord << '\t' << (getFilePos() / 1024 / 1024);
+						}
+						
 					}
                 }
             }
@@ -75,7 +79,7 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
 
 
 
-void ProcessorRu::processText(std::size_t idWord, std::string_view idPage, std::string_view title) noexcept
+void ProcessorRu::processText(std::size_t& idWord, std::string_view idPage, std::string_view title) noexcept
 {
 	charser it(text); // block iterator
 	charser line;	// line it gets each time
@@ -122,6 +126,7 @@ void ProcessorRu::processText(std::size_t idWord, std::string_view idPage, std::
 				if (!wordHeader.empty()) // flash previous
 				{
 					ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
+					++idWord;
 				}
 				
 				wordHeader = line;
@@ -208,7 +213,7 @@ void ProcessorRu::processText(std::size_t idWord, std::string_view idPage, std::
 	if (!ru) return; // no ru-section in this page
 	// write the last homograph (or single one if no level 2 headers, in this case wordHeader is just empty)
 	ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
-
+	++idWord;
 	if (braceCount) // unclosed multiline template link - should not happen, but...
 	{
 		ofstreams[subHeaderType] << '\n';
