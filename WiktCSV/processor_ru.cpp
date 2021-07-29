@@ -71,6 +71,10 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
 
     XmlParser::closeFile();
     XmlParser::FileWriter::closeFiles();
+	std::cout << '\n' << "Processed total:" << '\n' <<
+		idWord << " pages" << '\n' <<
+		getFilePos() << " bytes" << '\n' <<
+		"errorCode: " << (int)getErrorCode();
     return true;
 }
 
@@ -79,145 +83,144 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
 
 
 
-void ProcessorRu::processText(std::size_t& idWord, std::string_view idPage, std::string_view title) noexcept
+inline void ProcessorRu::processText(std::size_t& idWord, std::string_view idPage, std::string_view title) noexcept
 {
 	charser it(text); // block iterator
-	charser line;	// line it gets each time
+	charser line;	 // line which the iterator gets each time
 
-    bool ru = false;					// flag: ru-block				
-	std::string_view wordHeader = {};   // curr homograph; empty if there is no level 2
-	int subHeaderType = 0;				// sub-header id; values from file enum
-	int braceCount = 0;					// trace "{{...}}"
+    bool ru = false;					// flag indicating a russian word block				
+	std::string_view wordHeader = {};   // current homograph; empty if there's no level 2
+	int subHeaderType = 0;				// file to write current line
 
-    while(auto c = it.getspan(line, {'\r','\n' }, true))
+	std::string outputLine;
+	int braceCount = 0;					// counts '{' and '}' to detect multilines
+
+
+    while(it)
     { 
-		if(c == '\r') it.skip_if('\n'); // set up the pointer for the next line, in advance 
+		auto c = it.seek_span( { '\r','\n' }, true, line);
+		if(c == '\r') it.skip('\n'); // set up the pointer for the next line, in advance 
 
 		// parse the line; check for headers first
+		bool isHeader = false;
+		bool isSpec = false;
 
-		if (line.startsWith("= ")) // level 1 header; language
+		if (line.startsWith('=')) isHeader = true;
+		else if (line.startsWith(u8"&lt;!-- Служ")) isSpec = true;
+			
+		if (isHeader && line.startsWith("= ")) // level 1 header; language
 		{
 			if (ru) break; // a ru-section just ended; exit loop to write the word if needed; 
 			ru = (line == ("= {{-ru-}} ="));
 			continue;
 		}
 
-		if (!ru) continue; // skip all non-ru lines - until a next level 1 header, if any
+		if (!ru) continue; // skip non-ru 
 
-		// ru section
-
-		if (!line) continue; // skip empty ones
-
-
-		if (line.startsWith("==")) // some header
-		{
-			if (braceCount) // unclosed multiline template link - should not happen, but...
+		if (isHeader || isSpec)
+		{	
+			if (!isSpec)
 			{
-				ofstreams[subHeaderType] << '\n';
-				braceCount = 0;
-			}
-
-			subHeaderType = 0;
-
-			if (line.startsWith("== ")) // level 2 header: homograph title
-			{
-				line.skip(3);
-				line.getspan(line, " ==", false);
-				if (!wordHeader.empty()) // flash previous
+				if (line.skip("== ")) // level 2 header: homograph title
 				{
-					ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
-					++idWord;
+					line.seek_span(" ==", false, line);
+					if (!wordHeader.empty()) // flash previous
+					{
+						ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
+						++idWord;
+					}
+
+					wordHeader = line;
+					continue;
 				}
-				
-				wordHeader = line;
-				continue;
-			}
 
-			line.seek(' ', true); 
+				line.seek(' ', true);
 
-			if (line.startsWith(u8"Морф"))
-			{
-				subHeaderType = SYNTAX;
-				continue;
+				if (line.startsWith(u8"Морф")) subHeaderType = SYNTAX;
+				else if (line.startsWith(u8"Этим")) subHeaderType = ETIMOLOGY;
+				else if (line.startsWith(u8"Фраз")) subHeaderType = PHRASES;
+				else if (line.startsWith(u8"Посл")) subHeaderType = SAYINGS;
+				else if (line.startsWith(u8"Знач")) subHeaderType = MEANINGS;
+				else subHeaderType = 0;
 			}
-			if (line.startsWith(u8"Этим"))
-			{
-				subHeaderType = ETIMOLOGY;
-				continue;
-			}
-			if (line.startsWith(u8"Фраз"))
-			{
-				subHeaderType = PHRASES;
-			    continue;
-			}
-			if (line.startsWith(u8"Посл"))
-			{
-				subHeaderType = SAYINGS;
-				continue;
-			}
-			if (line.startsWith(u8"Знач"))
-			{
-				subHeaderType = MEANINGS;
-				continue;
-			}	
-			continue;
-		}
-
-		if (line.startsWith(u8"&lt;!-- Служ"))
-		{
-			if (braceCount) // unclosed multiline template link - should not happen, but...
-			{
-				ofstreams[subHeaderType] << '\n';
-				braceCount = 0;
-			}
-			subHeaderType = CATEGORY;
+			else subHeaderType = CATEGORY;
 			continue;
 		}
 
 		// text line
 
-		if(!subHeaderType) continue;
+		if(!subHeaderType) continue; // skip data we do not need
 
-		if (!braceCount)
+		line.seek(gt(' ')); // trim leading blanks
+
+		if (!line) continue; // skip empty ones
+
+		if (line == "* " || line == "# ")  continue;
+
+		if (subHeaderType == CATEGORY)
 		{
-			if (line == "* " || line == "# ")  continue;
-
-			if (subHeaderType == CATEGORY && !line.startsWith(u8"{{Категория")) continue;
-			if (subHeaderType == CATEGORY && line == u8"{{Категория|язык = ru|||}}") continue;
-
-		} 
-
-
-		auto n = 0; // local brace count
-
-		charser tmp(line);
-
-		while (auto c = tmp.getc()) // count braces and replace tabs
+			if (!line.startsWith(u8"{{Кат")) continue;
+		}
+		else
 		{
-			if(c == '{') ++n;
-			else if (c == '}') --n;
-			else if (c == '\t')
+			if (line == "{{table-bot}}") continue;
+			if (line == "{{table-top}}") continue;
+			if (line == u8"{{конец кол}}")  continue;
+			if (line.startsWith(u8"{{кол|"))
 			{
-				char* p = (char*)tmp.get() - 1;
-				*p = ' ';
+				line.seek("}}", true);
+				if(!line)continue;
 			}
 		}
+		if (!braceCount) outputLine.clear();
 
+		// append chars to outputLine with clean up
+
+		while (auto c = line.getc())
+		{
+			if (c == '{') ++braceCount;
+			else if (c == '}') --braceCount;
+			else if (c == '\t') c = ' ';
+			outputLine += c;
+		}
+
+		if (braceCount)
+		{
+			outputLine += ' '; // otherwise words can glue together as we removed linebreaks
+			continue; // until braces match in a next line
+		}
+
+		// write outputLine
+
+		if (subHeaderType == CATEGORY) // split it into words and write separate records
+		{
+			charser categoryLine(outputLine);
+			charser categoryDef;
+			categoryLine.skip(u8"{{Категория");
+			categoryLine.seek('|', true);		
+			while (categoryLine)
+			{
+				categoryLine.seek(gt(' '));
+				categoryLine.seek_span({ '|','}' }, true, categoryDef);
+				if (!categoryDef) continue;
+				if (categoryDef.startsWith ('}')) continue;
+				if (categoryDef.startsWith(u8"язык") && categoryDef.contains('=')) continue;
+				ofstreams[subHeaderType] << idWord << '\t' << categoryDef << '\n';
+				categoryLine.seek(gt(' '));
+			}
 		
-		if (!braceCount) ofstreams[subHeaderType] << idWord << '\t';
-		ofstreams[subHeaderType] << line;
-		braceCount += n;
-		if (!braceCount) ofstreams[subHeaderType] << '\n';
+		}
+		else
+		{
+			ofstreams[subHeaderType] << idWord << '\t' << outputLine << '\n';
+		}
+
     }
 
 	if (!ru) return; // no ru-section in this page
+
 	// write the last homograph (or single one if no level 2 headers, in this case wordHeader is just empty)
 	ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
 	++idWord;
-	if (braceCount) // unclosed multiline template link - should not happen, but...
-	{
-		ofstreams[subHeaderType] << '\n';
-		braceCount = 0;
-	}
 
 }
