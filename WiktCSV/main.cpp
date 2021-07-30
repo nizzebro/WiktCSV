@@ -9,9 +9,11 @@ using namespace wiktcsv;
 
 int main(int argc, char *argv[]) 
 {
+	HeaderAnalyserRu p;
+	p.process("D:\\Projects\\Wiktionary\\", "ruwiktionary-20210520-pages-articles-multistream.xml");
 
-    ProcessorRu p;
-    p.process("D:\\Projects\\Wiktionary\\", "sample.xml"); //"ruwiktionary-20210520-pages-articles-multistream.xml"
+    //ProcessorRu p;
+    //p.process("D:\\Projects\\Wiktionary\\", "ruwiktionary-20210520-pages-articles-multistream.xml"); //
 
   return 0;
 }

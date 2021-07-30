@@ -55,6 +55,29 @@ class ProcessorRu: XmlParser, XmlParser::FileWriter
 
 };
 
+// this class is for first-stage primary analysis of header and syntax-line structure;
+// since wiki data is poorly organized and no way to know in advance which headers and templates
+// might be are used in addition to common ones.
+// It's code does two things:
+// 1) extracts all unique sub-header names into a file;
+// 2) extracts all unique template tags found within level1 and level2 headers
+
+class HeaderAnalyserRu : XmlParser, XmlParser::FileWriter
+{
+	static constexpr std::initializer_list<const char*> fileNames =
+	{ "unique_headers.csv","unique_upper_level_tags.csv" };
+	XmlParser::FileWriter& ofstreams = static_cast<XmlParser::FileWriter&>(*this);
+public:
+	bool process(const char* dir, const char* fileName) ;
+	
+};
+
+
+
+
+
+
+
 
 };
 
