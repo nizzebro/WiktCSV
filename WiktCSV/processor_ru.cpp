@@ -19,7 +19,7 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
     if(!XmlParser::FileWriter::openFiles(std::move(s), fileNames)) return false;
 
 
-	std::string title, idPage; // page title, id
+	std::string title; // page title
 	std::string rem;    // accumulator for special pages
 	std::size_t idWord = 0;
 
@@ -30,34 +30,33 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
     {                
         if(isElement("page"))      // <page> start
         {
-            rem = text;                // accumulate anything until <ns> says which namespace this is
+            rem = getText();                // accumulate anything until <ns> says which namespace this is
             auto i = getLevel();         
             while(next(i))                  // for each item in this page 
             {  
-                rem.append(text);  
+                rem.append(getText());
 
 				if (!isText())  continue;
 
                 auto name = getName();
-                if(name == "title") title = text;
+                if(name == "title") title = getText();
                 else if (name == "ns") 
                 {
-                    if(text != "0")     // special page (template, category, etc); append it to to rem.xml
+                    if(getText() != "0")     // special page (template, category, etc); append it to to rem.xml
                     {
 						ofstreams[REM] << rem; // flush accum...
                         while(next(i))  // ... and the rest;
                         {
-							ofstreams[REM] << text;
+							ofstreams[REM] << getText();
 							if (isElementEnd()) ofstreams[REM] << '\n';
                         }
                         break;
                     }
                 }
-                else if (name == "id") idPage = text;
                 else if (name == "redirect") break;     // skip any redirecting stub pages
 				else if (name == "text")
 				{
-					processText(idWord, idPage, title); /// text always goes last; we have all vars collected
+					processText(idWord,  title); /// text always goes last; we have all vars collected
 					if ((idWord & 0xFF) == 0) // each 256 pages
 					{
 						std::cout << "\r                       ";
@@ -69,6 +68,12 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
             }
         }
     }
+	int i = 0;
+	for (auto & s : wordTypeNames)
+	{
+		ofstreams[WORDTYPENAMES] << i << '\t' << s << '\n';
+		++i;
+	}
 
     XmlParser::closeFile();
     XmlParser::FileWriter::closeFiles();
@@ -80,163 +85,331 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
 }
 
 
-
-
-
-
-inline void ProcessorRu::processText(std::size_t& idWord, std::string_view idPage, std::string_view title) noexcept
+inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title) noexcept
 {
-	charser it(text); // block iterator
+	charser text(getText()); // block iterator
 	charser line;	 // line which the iterator gets each time
 
-    bool ru = false;					// flag indicating a russian word block				
-	std::string_view wordHeader = {};   // current homograph; empty if there's no level 2
-	int subHeaderType = 0;				// file to write current line
+    bool ru = false;					// inside a russian word block				
+	std::string_view homograph = {};    // title of homograph (level 2); empty if none
+	int subHeaderType = 0;				 // header type; value from the file enum
 
-	std::string outputLine;
+	std::string outputLine = {};		// buffer to process lines before writing 
 	int braceCount = 0;					// counts '{' and '}' to detect multilines
+	
+	int wordType = 0;
+	int stress = 0;
 
+	std::string pat;
 
-    while(it)
+	if (title[0] >= (char)0xD0 && title[1] <= (char)0xAF)
+	{
+		wordType = kTypeProper;
+	}
+	else
+	{
+		charser it(title);
+		if (it.contains(' ')) wordType = kTypePhrase;
+	}
+
+    while(text)
     { 
-		auto c = it.seek_span( {'\n', '\r' }, true, line);
-		it.trimLeading('\n'); // set up the pointer for the next line, in advance 
+		text.seek_span( {'\n', '\r' }, true, line);
+		text.trimLeading('\n'); // set up the pointer for the next line, in advance 
 		line.trim(lt_eq(' '));
 		
+		if (!line || line == "*" || line == "#")  continue;
 
 		// parse the line; check for headers first
 
-		if (line.skip('='))
+		if (!braceCount) // not a prolongation of a previous multiline tag?
 		{
-			if (!line.skip('=')) // level 1 header; language
+			if (line.skip('='))
 			{
-				if (ru) break; // a ru-section just ended; exit loop to write the word if needed; 
-				line.trimLeading(lt_eq(' '));
-				ru = (line.startsWith("{{-ru-}}"));
-				continue;
-			}
-
-			if (!ru) continue; // skip non-ru 
-
-			if (!line.skip('=')) // level 2 header: homograph title
-			{
-				line.seek_span("==", false, line);
-				line.trim(lt_eq(' '));
-				//if(line && *line.end() == ' ') line.setEnd()
-				if (!wordHeader.empty()) // flash previous
+				if (!line.skip('=')) // level 1 header; language
 				{
-					ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
-					++idWord;
+					if (ru) break; // a ru-section just ended; exit loop to write the word if needed; 
+					line.trimLeading(lt_eq(' '));
+					ru = (line.startsWith("{{-ru-}}"));	
+					continue;
 				}
-				wordHeader = line;
+
+				if (!ru) continue; // skip non-ru headers
+
+				if (!line.skip('=')) // level 2 header: homograph title
+				{
+					line.seek_span("==", false, line);
+					line.trim(lt_eq(' '));
+
+					// flash previous
+					if (!homograph.empty())
+					{
+						ofstreams[WORDS] << idWord << '\t'  << title << '\t' << homograph <<
+							'\t' << wordType << '\t' << pat << '\t' << stress << '\n';
+						pat.clear();
+						++idWord;
+						subHeaderType = 0;
+						wordType = kTypeUnknown;
+						stress = 0;
+					}
+
+					homograph = line;
+					continue;
+				}
+				// level >= 3 header
+
+				line.trimLeading('=');
+				line.trimLeading(' ');
+
+				if (line.startsWith(u8"Морф")) subHeaderType = LINES;
+				else if (line.startsWith(u8"Тип и")) subHeaderType = LINES;
+				else if (line.startsWith(u8"Омофор")) subHeaderType = LINES;
+				else if (line.startsWith(u8"Этим")) subHeaderType = LINES;
+				else if (line.startsWith(u8"Фраз")) subHeaderType = PHRASES;
+				else if (line.startsWith(u8"Типич")) subHeaderType = PHRASES;
+				else if (line.startsWith(u8"Посл")) subHeaderType = SAYINGS;
+				else if (line.startsWith(u8"Знач")) subHeaderType = LINES;
+				else if (line.startsWith(u8"Сема")) subHeaderType = LINES;
+				else subHeaderType = -1;
+
 				continue;
 			}
 
-			line.trimLeading('=');
+			if(!ru) continue; // skip non-ru lines
 
-			if (line.startsWith(u8"Морф")) subHeaderType = SYNTAX;
-			else if (line.startsWith(u8"Тип ")) subHeaderType = SYNTAX;
-			else if (line.startsWith(u8"Этим")) subHeaderType = ETIMOLOGY;
-			else if (line.startsWith(u8"Фраз")) subHeaderType = PHRASES;
-			else if (line.startsWith(u8"Посл")) subHeaderType = SAYINGS;
-			else if (line.startsWith(u8"Знач")) subHeaderType = MEANINGS;
-			else subHeaderType = 0;
+			if (line.startsWith(u8"&lt;!-- Служ"))
+			{
+				subHeaderType = CATEGORY;
+				continue;
+			}
 
-			continue;
-		}
+			if (subHeaderType == -1) continue; // skip sub-headers we do not need
 
-		if (!ru) continue; // skip non-ru 
 
-		if (!line) continue; // skip empty ones
+			outputLine.clear(); // we will append
 
-		if (line.startsWith(u8"&lt;!-- Служ"))
-		{
-			subHeaderType = CATEGORY;
-			continue;
-		}
+		} // end if (!braceCount)
 
 		// text line
+		
+		// append line to outputLine, counting braces and replacing tabs with spaces
 
-		if (!subHeaderType)
-		{
-			if(line.startsWith(u8"{{Форм")) subHeaderType = SYNTAX;
-			else continue; // skip data we do not need
-		}
-
-
-		if (line == "*" || line == "#")  continue;
-
-		if (subHeaderType == CATEGORY)
-		{
-			if (!line.startsWith(u8"{{Кат")) continue;
-		}
-		else
-		{
-			if (line == "{{table-bot}}") continue;
-			if (line == "{{table-top}}") continue;
-			if (line == u8"{{конец кол}}")  continue;
-			if (line.startsWith(u8"{{кол|"))
-			{
-				line.seek("}}", true);
-				if(!line)continue;
-			}
-		}
-		if (!braceCount) outputLine.clear();
-
-		// append chars to outputLine with clean up
 
 		while (auto c = line.getc())
 		{
-			if (c == '{') ++braceCount;
+			if (c == '{')++braceCount;
 			else if (c == '}') --braceCount;
 			else if (c == '\t') c = ' ';
 			outputLine += c;
 		}
 
-		if (braceCount)
+		if (braceCount) // token is unfinished yet?
 		{
 			outputLine += ' '; // otherwise words can glue together as we removed linebreaks
-			continue; // until braces match in a next line
+			continue;
 		}
 
-		// write outputLine
+		// the string is complete, parse and write
 
-		if (subHeaderType == CATEGORY) // split it into words and write separate records
-		{
-			charser categoryLine(outputLine);
-			charser categoryDef;
-			categoryLine.skip(u8"{{Категория");
-			categoryLine.seek('|', true);		
-			while (categoryLine)
+		charser item(outputLine);
+
+		if (item.startsWith(u8"{{илл|")) continue;
+		if (item.startsWith(u8"{{table-")) continue;
+		if (item.startsWith(u8"{{кол|")) continue;
+		if (item.startsWith(u8"{{конец")) continue;
+		if (subHeaderType == CATEGORY || item.startsWith(u8"{{Категория"))
+		{	
+			if (!item.skip(u8"{{Категория")) continue;	
+			item.seek('|', true);
+			charser def;
+			// break into separate category tokens and write them to table
+			while (item)
 			{
-				categoryLine.seek(gt(' '));
-				categoryLine.seek_span({ '|','}' }, true, categoryDef);
-				if (!categoryDef) continue;
-				if (categoryDef.startsWith(u8"язык") && categoryDef.contains('=')) continue;
-				if (categoryDef.startsWith ('}')) continue;
-				ofstreams[subHeaderType] << idWord << '\t' << categoryDef << '\n';
+				if(item.seek_span({ '|','}', '{'}, true, def) == '{') break;
+				def.trim(' ');
+				if (!def) continue;
+				if (def.startsWith(u8"язык") && def.contains('=')) continue;
+				ofstreams[CATEGORY] << idWord << '\t' << def << '\n';
 			}
-		
-		}
-		else
-		{
-			ofstreams[subHeaderType] << idWord << '\t' << outputLine << '\n';
+			continue;
 		}
 
+		if (subHeaderType)
+		{
+			if (subHeaderType == LINES)
+			{
+				// skip empty ones
+				if (item == u8"От {{этимология:|да}}")  continue;
+				if (item == u8"Происходит от {{этимология:|да}}")  continue;
+			}
+			else
+			{
+				ofstreams[subHeaderType] << outputLine << '\n';
+				continue;
+			}
+		}
+
+		// handle {morpho-ru}
+		if (item.startsWith(u8"{{морфо"))
+		{
+			item.seek('|', true);
+			charser def;
+			while (item)
+			{
+				item.seek_span({ '|','}' }, true, def);
+				def.trim(' ');
+				if (!def) continue;
+				if (def.startsWith(u8"и=")) continue;
+				int type = 0;
+				if (def.skip('-'))
+				{
+					if (!def.endsWith('-'))
+					{
+						type |= kTypeSuffix;
+						if (def.skip('-')) type = kTypeSuffixoid;
+					}
+					else
+					{
+						def.setEnd(def.end() - 1);
+						type |= kTypeInterfix;
+					}
+				}
+				else
+				{
+					if (def.skip('+')) type = kTypeEnding;
+					else
+					{
+						if (!def.endsWith('-')) type = kTypeRoot;
+						else
+						{
+							def.setEnd(def.end() - 1);
+							if (!def.endsWith('-')) type = kTypePrefix;
+							else
+							{
+								def.setEnd(def.end() - 1);
+								type = kTypePrefixoid;
+							}
+						}
+					}
+				}
+				ofstreams[WORDMORPH] << idWord << '\t' << type << '\t' << def << '\n';
+			}
+		}
+		else if (!wordType)
+		{
+			
+			if (item.startsWith(u8"{{morph"))
+			{
+				item.seek('|', true);
+				charser def;
+				while (item)
+				{
+					item.seek_span({ '|','}' }, true, def);
+					def.trim(' ');
+					if (!def) continue;
+					if (def.startsWith("p=") || def.startsWith("pr"))
+					{
+						wordType = kTypePrefix;
+					}
+					else if (def.startsWith("po")) wordType = kTypePostfix;
+					else if (def.startsWith("s")) wordType = kTypeSuffix;
+					else if (def.startsWith("i")) wordType = kTypeInterfix;
+					else if (def.startsWith("t")) wordType = kTypeInterfix;
+					else if (def.startsWith("c")) wordType = kTypeCircumfix;
+					else if (def.startsWith("r")) wordType = kTypeRoot;
+					else if (def.startsWith("e")) wordType = kTypeEnding;
+					continue;
+				}
+			}
+			else if (item.startsWith(u8"{{suffix")) wordType = kTypeSuffix;
+			else if (item.startsWith(u8"{{собств")) wordType = kTypeProper;
+			else if (item.startsWith(u8"{{phrase")) wordType = kTypePhrase;
+			else if (item.startsWith(u8"{{Форм") || item.startsWith(u8"{{словоформа")) wordType = kTypeForm;
+			else
+			{
+				int t = 0;
+
+				if (item.startsWith(u8"{{числ ")) t = kTypeNumeral;
+				else if (item.startsWith(u8"{{сущ "))  t = kTypeNoun;
+				else if (item.startsWith(u8"{{прил "))  t = kTypeAdj;
+				else if (item.startsWith(u8"{{мест "))  t = kTypePronoun;
+				else if (item.startsWith(u8"{{Мс-"))  t = kTypePossess;
+				else if (item.startsWith(u8"{{гл "))  t = kTypeVerb;
+				else if (item.startsWith(u8"{{прич "))  t = kTypeParticiple;
+
+				if (t)
+				{
+					item.seek("ru", true);
+					item.seek_append('|', false, pat);
+				}
+				else
+				{
+					if (item.startsWith(u8"{{сущ-")) t = kTypeNoun;
+					else if (item.startsWith(u8"{{прил-")) t = kTypeAdj;
+			
+					if (t)
+					{
+						item.seek('|', true);
+						item.seek('|', true);
+						item.skip(u8"индекс=");
+						item.seek_append('|', false, pat);
+					}
+					else if (item.startsWith(u8"{{adv ")) t = kTypeAdv;
+					else if (item.startsWith(u8"{{conj ")) t = kTypeConj;
+					else if (item.startsWith(u8"{{деепр ")) t = kTypeAdvParticiple;
+					else if (item.startsWith(u8"{{part ")) t = kTypePart;
+					else if (item.startsWith(u8"{{prep ")) t = kTypePrep;
+					else if (item.startsWith(u8"{{interj ")) t = kTypeInterj;
+					else if (item.startsWith(u8"{{pred ")) t = kTypePred;
+				}
+			}
+
+		}
+
+		if (!stress) stress = getStressedSyllable(item);
+
+		if (!subHeaderType) continue;
+
+		//  LINES left only...
+		ofstreams[LINES] << idWord << '\t' << outputLine << '\n';
     }
 
 	if (!ru) return; // no ru-section in this page
 
-	// write the last homograph (or single one if no level 2 headers, in this case wordHeader is just empty)
-	ofstreams[WORDS] << idWord << '\t' << idPage << '\t' << title << '\t' << wordHeader << '\n';
-	++idWord;
 
+	// write the last homograph (or single one if no level 2 headers, in this case wordHeader is just empty)
+	ofstreams[WORDS] << idWord << '\t' <<  title << '\t' << homograph 
+		<< '\t' << wordType << '\t' << pat << '\t' << stress << '\n';
+	++idWord;
+	
 }
+
+
+// {{по-слогам|}}
+inline int wiktcsv::ProcessorRu::getStressedSyllable(u8charser s) noexcept
+{
+	s.trim(' ');
+	
+	if (!s.seek(u8"{{по-слогам|", true)) return 0;
+	u8charser def;
+	int i = 0;
+	UChar c;
+	do 
+	{
+		c = s.seek_span('|', true, def);
+		if (!def) return 0;
+		++i;
+		if (def.contains(std::initializer_list<UChar>{0x301, U'ё' })) return i; // acute or ё
+	} while (c);
+
+	return i == 1? i : 0;
+}
+
+
+/////////////////////////////////////////
 
 bool wiktcsv::HeaderAnalyserRu::process(const char * dir, const char * fileName) 
 {
-
-
 		std::string s = dir;
 		if (s.back() != '\\') s += ('\\');
 		auto pos = s.size();
@@ -246,25 +419,38 @@ bool wiktcsv::HeaderAnalyserRu::process(const char * dir, const char * fileName)
 		s.erase(pos);
 		if (!XmlParser::FileWriter::openFiles(std::move(s), fileNames)) return false;
 
+		struct Item
+		{
+			std::string name;
+			std::size_t count;
+		};
 
-		std::vector<std::string> hdrNames;
-		std::vector<std::string> tmplNames;
+		std::vector<Item> hdrNames;
+		std::vector<Item> tmplNames;
 
 		auto addHeaderName = [&](std::string_view s)
 		{
 			for (auto & h : hdrNames)
 			{
-				if (h == s) return;
+				if (h.name == s)
+				{
+					h.count++;
+					return;
+				}
 			}
-			hdrNames.push_back(std::string(s));
+			hdrNames.push_back({ std::string(s), 1});
 		};
 		auto addTmplName = [&](std::string_view s)
 		{
 			for (auto & h : tmplNames)
 			{
-				if (h == s) return;
+				if (h.name == s)
+				{
+					h.count++;
+					return;
+				}
 			}
-			tmplNames.push_back(std::string(s));
+			tmplNames.push_back({ std::string(s), 1 });
 		};
 
 
@@ -279,13 +465,13 @@ bool wiktcsv::HeaderAnalyserRu::process(const char * dir, const char * fileName)
 
 			if (name == "ns")
 			{
-				isWord = (text == "0");
+				isWord = (getText() == "0");
 				continue;
 			}
 			if (name == "redirect") isWord = false;
 			if (name != "text") continue;
 		
-			charser it(text); // block iterator
+			charser it(getText()); // block iterator
 			charser line;	 // line which the iterator gets each time
 
 			bool ru = false;			// inside russian word block				
@@ -350,12 +536,16 @@ bool wiktcsv::HeaderAnalyserRu::process(const char * dir, const char * fileName)
 		
 		for (auto & h : hdrNames)
 		{
-			ofstreams[0] << h << '\n';
+			ofstreams[0] << h.name << '\t' <<  h.count << '\n';
 		}
 		for (auto & h : tmplNames)
 		{
-			ofstreams[1] << h << '\n';
+			ofstreams[1] << h.name << '\t' << h.count << '\n';
 		}
+
+		
+
+
 
 		XmlParser::closeFile();
 		XmlParser::FileWriter::closeFiles();
