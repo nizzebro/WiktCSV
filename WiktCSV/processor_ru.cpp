@@ -98,7 +98,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 	int braceCount = 0;					// counts '{' and '}' to detect multilines
 	
 	int wordType = 0;
-	int stress = 0;
+	int wordStress = 0;
 
 	std::string pat;
 
@@ -115,7 +115,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
     while(text)
     { 
 		text.seek_span( {'\n', '\r' }, true, line);
-		text.trimLeading('\n'); // set up the pointer for the next line, in advance 
+		text.trimLeading('\n'); // set up the pointer for the next line, in skip 
 		line.trim(lt_eq(' '));
 		
 		if (!line || line == "*" || line == "#")  continue;
@@ -124,9 +124,9 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 
 		if (!braceCount) // not a prolongation of a previous multiline tag?
 		{
-			if (line.skip('='))
+			if (line.skip_if('='))
 			{
-				if (!line.skip('=')) // level 1 header; language
+				if (!line.skip_if('=')) // level 1 header; language
 				{
 					if (ru) break; // a ru-section just ended; exit loop to write the word if needed; 
 					line.trimLeading(lt_eq(' '));
@@ -136,7 +136,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 
 				if (!ru) continue; // skip non-ru headers
 
-				if (!line.skip('=')) // level 2 header: homograph title
+				if (!line.skip_if('=')) // level 2 header: homograph title
 				{
 					line.seek_span("==", false, line);
 					line.trim(lt_eq(' '));
@@ -144,13 +144,14 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 					// flash previous
 					if (!homograph.empty())
 					{
-						ofstreams[WORDS] << idWord << '\t'  << title << '\t' << homograph <<
-							'\t' << wordType << '\t' << pat << '\t' << stress << '\n';
+
+						ofstreams[WORDS] << idWord << '\t' << title << '\t' << homograph;
+						ofstreams[WORDS] << '\t' << wordType << '\t' << pat << '\t' << wordStress << '\n';
 						pat.clear();
 						++idWord;
 						subHeaderType = 0;
 						wordType = kTypeUnknown;
-						stress = 0;
+						wordStress = 0;
 					}
 
 					homograph = line;
@@ -211,17 +212,16 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 
 		// the string is complete, parse and write
 
-		charser item(outputLine);
+		u8charser item(outputLine);
 
 		if (item.startsWith(u8"{{илл|")) continue;
 		if (item.startsWith(u8"{{table-")) continue;
 		if (item.startsWith(u8"{{кол|")) continue;
 		if (item.startsWith(u8"{{конец")) continue;
-		if (subHeaderType == CATEGORY || item.startsWith(u8"{{Категория"))
+		if (item.skip_if(u8"{{Категория"))
 		{	
-			if (!item.skip(u8"{{Категория")) continue;	
 			item.seek('|', true);
-			charser def;
+			u8charser def;
 			// break into separate category tokens and write them to table
 			while (item)
 			{
@@ -231,7 +231,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 				if (def.startsWith(u8"язык") && def.contains('=')) continue;
 				ofstreams[CATEGORY] << idWord << '\t' << def << '\n';
 			}
-			continue;
+			if(subHeaderType == CATEGORY) continue;
 		}
 
 		if (subHeaderType)
@@ -253,7 +253,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 		if (item.startsWith(u8"{{морфо"))
 		{
 			item.seek('|', true);
-			charser def;
+			u8charser def;
 			while (item)
 			{
 				item.seek_span({ '|','}' }, true, def);
@@ -261,12 +261,12 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 				if (!def) continue;
 				if (def.startsWith(u8"и=")) continue;
 				int type = 0;
-				if (def.skip('-'))
+				if (def.skip_if('-'))
 				{
 					if (!def.endsWith('-'))
 					{
 						type |= kTypeSuffix;
-						if (def.skip('-')) type = kTypeSuffixoid;
+						if (def.skip_if('-')) type = kTypeSuffixoid;
 					}
 					else
 					{
@@ -276,7 +276,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 				}
 				else
 				{
-					if (def.skip('+')) type = kTypeEnding;
+					if (def.skip_if('+')) type = kTypeEnding;
 					else
 					{
 						if (!def.endsWith('-')) type = kTypeRoot;
@@ -301,7 +301,7 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 			if (item.startsWith(u8"{{morph"))
 			{
 				item.seek('|', true);
-				charser def;
+				u8charser def;
 				while (item)
 				{
 					item.seek_span({ '|','}' }, true, def);
@@ -327,46 +327,51 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 			else if (item.startsWith(u8"{{Форм") || item.startsWith(u8"{{словоформа")) wordType = kTypeForm;
 			else
 			{
-				int t = 0;
 
-				if (item.startsWith(u8"{{числ ")) t = kTypeNumeral;
-				else if (item.startsWith(u8"{{сущ "))  t = kTypeNoun;
-				else if (item.startsWith(u8"{{прил "))  t = kTypeAdj;
-				else if (item.startsWith(u8"{{мест "))  t = kTypePronoun;
-				else if (item.startsWith(u8"{{Мс-"))  t = kTypePossess;
-				else if (item.startsWith(u8"{{гл "))  t = kTypeVerb;
-				else if (item.startsWith(u8"{{прич "))  t = kTypeParticiple;
+				if (item.startsWith(u8"{{числ ")) wordType = kTypeNumeral;
+				else if (item.startsWith(u8"{{сущ "))  wordType = kTypeNoun;
+				else if (item.startsWith(u8"{{прил "))  wordType = kTypeAdj;
+				else if (item.startsWith(u8"{{мест "))  wordType = kTypePronoun;
+				else if (item.startsWith(u8"{{Мс-"))  wordType = kTypePossess;
+				else if (item.startsWith(u8"{{гл "))  wordType = kTypeVerb;
+				else if (item.startsWith(u8"{{прич "))  wordType = kTypeParticiple;
+				else if (item.startsWith(u8"{{деепр "))  wordType = kTypeAdvParticiple;
 
-				if (t)
+				if (wordType)
 				{
 					item.seek("ru", true);
 					item.seek_append('|', false, pat);
 				}
 				else
 				{
-					if (item.startsWith(u8"{{сущ-")) t = kTypeNoun;
-					else if (item.startsWith(u8"{{прил-")) t = kTypeAdj;
+					if (item.startsWith(u8"{{сущ-")) wordType = kTypeNoun;
+					else if (item.startsWith(u8"{{прил-")) wordType = kTypeAdj;
 			
-					if (t)
+					if (wordType)
 					{
 						item.seek('|', true);
 						item.seek('|', true);
-						item.skip(u8"индекс=");
+						item.skip_if(u8"индекс=");
 						item.seek_append('|', false, pat);
 					}
-					else if (item.startsWith(u8"{{adv ")) t = kTypeAdv;
-					else if (item.startsWith(u8"{{conj ")) t = kTypeConj;
-					else if (item.startsWith(u8"{{деепр ")) t = kTypeAdvParticiple;
-					else if (item.startsWith(u8"{{part ")) t = kTypePart;
-					else if (item.startsWith(u8"{{prep ")) t = kTypePrep;
-					else if (item.startsWith(u8"{{interj ")) t = kTypeInterj;
-					else if (item.startsWith(u8"{{pred ")) t = kTypePred;
+					else if (item.startsWith(u8"{{adv ")) wordType = kTypeAdv;
+					else if (item.startsWith(u8"{{conj ")) wordType = kTypeConj;
+					else if (item.startsWith(u8"{{деепр ")) wordType = kTypeAdvParticiple;
+					else if (item.startsWith(u8"{{part ")) wordType = kTypePart;
+					else if (item.startsWith(u8"{{prep ")) wordType = kTypePrep;
+					else if (item.startsWith(u8"{{interj ")) wordType = kTypeInterj;
+					else if (item.startsWith(u8"{{pred ")) wordType = kTypePred;
 				}
 			}
 
 		}
 
-		if (!stress) stress = getStressedSyllable(item);
+		if (!wordStress)
+		{
+			wordStress = getStressedSyllable(item);
+
+		}
+			
 
 		if (!subHeaderType) continue;
 
@@ -378,29 +383,52 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 
 
 	// write the last homograph (or single one if no level 2 headers, in this case wordHeader is just empty)
-	ofstreams[WORDS] << idWord << '\t' <<  title << '\t' << homograph 
-		<< '\t' << wordType << '\t' << pat << '\t' << stress << '\n';
+
+	
+		
+
+
+	ofstreams[WORDS] << idWord << '\t' << title << '\t' << homograph;
+	ofstreams[WORDS] << '\t' << wordType << '\t' << pat << '\t' << wordStress << '\n';
 	++idWord;
 	
 }
 
 
 // {{по-слогам|}}
-inline int wiktcsv::ProcessorRu::getStressedSyllable(u8charser s) noexcept
+ int wiktcsv::ProcessorRu::getStressedSyllable(u8charser s) noexcept
 {
 	s.trim(' ');
 	
-	if (!s.seek(u8"{{по-слогам|", true)) return 0;
-	u8charser def;
+	if (!s.seek(u8"{{по", true)) return 0;
+	if (!s.skip_if({ U'-',U' ' })) return 0;
+	if (!s.seek(u8"слогам|", true)) return 0;
+
+
+
+	
+	 any_of<UChar> pred({U'а',U'е',U'и',U'о',U'у',U'ы',U'э',U'ю',U'я'});
 	int i = 0;
-	UChar c;
-	do 
+	while(UChar c = s.getc())
 	{
-		c = s.seek_span('|', true, def);
-		if (!def) return 0;
-		++i;
-		if (def.contains(std::initializer_list<UChar>{0x301, U'ё' })) return i; // acute or ё
-	} while (c);
+		if (c == U'}')
+		{
+			break;
+		}
+
+		if (pred(c) || pred(c - 0x20))
+		{
+			++i;
+		}
+ 		else if (c == 0x301) // acute
+		{
+			return i;
+		}
+		else if (c == U'ё' || c == U'Ё')
+		{
+			return i + 1;
+		}	
+	}
 
 	return i == 1? i : 0;
 }
@@ -479,7 +507,7 @@ bool wiktcsv::HeaderAnalyserRu::process(const char * dir, const char * fileName)
 			while (it)
 			{
 				auto c = it.seek_span({ '\r','\n' }, true, line);
-				if (c == '\r') it.skip('\n'); // set up the pointer for the next line, in advance 
+				if (c == '\r') it.skip('\n'); // set up the pointer for the next line, in skip 
 
 				line.trim(lt_eq(' '));
 				if (!line) continue; // skip empty ones
@@ -524,7 +552,7 @@ bool wiktcsv::HeaderAnalyserRu::process(const char * dir, const char * fileName)
 
 				if (!subHeader)
 				{
-					if (line.skip("{{"))
+					if (line.skip_if("{{"))
 					{
 						line.seek_span({ '|','}' }, false, line);
 						addTmplName(line);

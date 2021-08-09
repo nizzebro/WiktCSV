@@ -22,12 +22,12 @@ namespace wiktcsv {
 // Tables:
 
 // WORDS: homographs
-// IdWord(counter), Title(from xml), Header, Type, Pat, Stress
-// where Header is level 1 header string, e.g. "{{заголовок|I}}" -
+// IdWord(counter), title(from xml), homograph, type, pat, stress
+// where homograph is level 1 header string, e.g. "{{заголовок|I}}" -
 // or an empty field if there are no variations;
-// Type = enum Types, bit set
-// Pat = declension pattern
-// Stress = vowel stressed
+// type = enum Types, bit set
+// pat = declension pattern
+// stress = vowel stressed
 
 // LINES
 // IdWord, Text
@@ -108,7 +108,7 @@ class ProcessorRu: XmlParser, XmlParser::FileWriter
 
 
 	inline void processText(std::size_t& idWord, std::string_view title) noexcept;
-	inline int getStressedSyllable(u8charser s) noexcept;
+	 int getStressedSyllable(u8charser s) noexcept;
 	XmlParser::FileWriter& ofstreams = static_cast<XmlParser::FileWriter&>(*this);
 
     public:
@@ -118,7 +118,7 @@ class ProcessorRu: XmlParser, XmlParser::FileWriter
 };
 
 // this class is for first-stage primary analysis of header and syntax-line structure;
-// since wiki data is poorly organized and no way to know in advance which headers and templates
+// since wiki data is poorly organized and no way to know in skip which headers and templates
 // might be are used in addition to common ones.
 // It's code does two things:
 // 1) extracts all unique sub-header names into a file;
