@@ -22,7 +22,7 @@ namespace wiktcsv {
 // Tables:
 
 // WORDS: homographs
-// IdWord(counter), title(from xml), homograph, type, pat, stress
+// IdWord(counter), title(from xml), homograph, type, inflection, stress
 // where homograph is level 1 header string, e.g. "{{заголовок|I}}" -
 // or an empty field if there are no variations;
 // type = enum Types, bit set
@@ -68,47 +68,56 @@ class ProcessorRu: XmlParser, XmlParser::FileWriter
 	enum
 	{
 		kTypeUnknown = 0,
-		kTypePhrase,
-		kTypeProper,
+
+		kTypeNoun,
+		kTypeVerb,
+		kTypeAdj,
+		kTypeAdv,
+		kTypeIntro,
+
+		kTypePronoun,
+		kTypeNumeral,
+		kTypePred,
+		kTypePossess,
+
+		kTypePart,
+		kTypeConj,
+		kTypeInterj,
+		kTypeSound,
+		kTypePrep,
 
 		kTypeRoot,
 		kTypePrefix,
 		kTypeSuffix,
 		kTypeCircumfix,
+
 		kTypePrefixoid,
 		kTypeSuffixoid,
 		kTypeInterfix,
 		kTypeEnding,
 		kTypePostfix,
 
-		kTypePart,
-
-		kTypeConj,
-		kTypeInterj,
-		kTypePrep,
-
-		kTypeNoun,
-		kTypeVerb,
-		kTypeAdj,
-		kTypeAdv,
-		kTypeParticiple,
-		kTypeAdvParticiple,
-		kTypePronoun,
-		kTypeNumeral,
-		kTypePred,
-		kTypePossess,
-
-		kTypeForm
+		kTypeForm,
+		kTypePhrase,
+		kTypeProper,
+		kTypeAbbrev
+		
 	};
 	static constexpr std::initializer_list<const char*> wordTypeNames =
-	{ u8"",u8"Фраза",u8"Имя собств",u8"Корень",u8"Префикс",u8"Суффикс",u8"Циркумфикс",u8"Префиксоид",u8"Суффиксоид",
-	 u8"Интерфикс",u8"Окончание",u8"Постфикс",u8"Частица",u8"Союз",u8"Междометие",u8"Предлог",
-		u8"Существительное",u8"Глагол", u8"Прилагательное",u8"Наречие",u8"Причастие",u8"Деепричастие",
-		u8"Местоимение",u8"Числительное",u8"Предикатив",u8"Поссессив",u8"Форма" };
+	{   
+		u8"Существительное",u8"Глагол", u8"Прилагательное",u8"Наречие",u8"Вводное",
+		u8"Местоимение",u8"Числительное",u8"Предикатив",u8"Поссессив",
+		u8"Частица",u8"Союз",u8"Междометие",u8"Звукоподр",u8"Предлог",
+		u8"Корень",u8"Префикс",u8"Суффикс",	u8"Циркумфикс",
+		u8"Префиксоид",u8"Суффиксоид", u8"Интерфикс",u8"Окончание",u8"Постфикс",
+		u8"Форма", u8"Фраза",u8"Имя собств", u8"Сокращение"
+		
+		};
 
 
 	inline void processText(std::size_t& idWord, std::string_view title) noexcept;
-	 int getStressedSyllable(u8charser s) noexcept;
+	void appendInflection(int& tpe, u8charser s,  std::string & dst) noexcept;
+	int getStressedSyllable(u8charser s) noexcept;
 	XmlParser::FileWriter& ofstreams = static_cast<XmlParser::FileWriter&>(*this);
 
     public:
@@ -117,10 +126,9 @@ class ProcessorRu: XmlParser, XmlParser::FileWriter
 
 };
 
-// this class is for first-stage primary analysis of header and syntax-line structure;
-// since wiki data is poorly organized and no way to know in skip which headers and templates
-// might be are used in addition to common ones.
-// It's code does two things:
+// supplementary class used for first-stage primary analysis of article headers 
+// and syntax-line structure - to know if there are any non-standard headers 
+// which also hold important data, to process them later in the main class.
 // 1) extracts all unique sub-header names into a file;
 // 2) extracts all unique template tags found within level1 and level2 headers
 

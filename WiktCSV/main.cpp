@@ -13,7 +13,7 @@ int main(int argc, char *argv[])
 	//p.process("D:\\Projects\\Wiktionary\\", "ruwiktionary-20210520-pages-articles-multistream.xml");
 
     ProcessorRu p;
-    p.process("D:\\Projects\\Wiktionary\\", "sample.xml"); //
+    p.process("D:\\Projects\\Wiktionary\\", "ruwiktionary-20210520-pages-articles-multistream.xml"); //
 
   return 0;
 }

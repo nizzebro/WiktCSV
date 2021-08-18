@@ -21,7 +21,7 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
 
 	std::string title; // page title
 	std::string rem;    // accumulator for special pages
-	std::size_t idWord = 0;
+	std::size_t idWord = 1;
 
 	std::cout << "Processed pages/Mb:";
 	std::cout << '\n';
@@ -68,7 +68,7 @@ bool ProcessorRu::process(const char* dir, const char* fileName) noexcept
             }
         }
     }
-	int i = 0;
+	int i = 1;
 	for (auto & s : wordTypeNames)
 	{
 		ofstreams[WORDTYPENAMES] << i << '\t' << s << '\n';
@@ -102,15 +102,15 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 
 	std::string pat;
 
-	if (title[0] >= (char)0xD0 && title[1] <= (char)0xAF)
+	u8charser t(title);
+	auto c = t.getc();
+	if (of_range(U'А', U'Я')(c))
 	{
-		wordType = kTypeProper;
+		c = t.getc();
+		if (!(of_range(U'А', U'Я')(c))) wordType = kTypeProper;
+		else wordType = kTypeAbbrev;
 	}
-	else
-	{
-		charser it(title);
-		if (it.contains(' ')) wordType = kTypePhrase;
-	}
+	else if(t.contains(U' ')) wordType = kTypePhrase;
 
     while(text)
     { 
@@ -144,19 +144,19 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 					// flash previous
 					if (!homograph.empty())
 					{
-
 						ofstreams[WORDS] << idWord << '\t' << title << '\t' << homograph;
 						ofstreams[WORDS] << '\t' << wordType << '\t' << pat << '\t' << wordStress << '\n';
 						pat.clear();
 						++idWord;
 						subHeaderType = 0;
-						wordType = kTypeUnknown;
+						if(wordType < kTypePhrase) wordType = kTypeUnknown; // do not reset if abbr, proper name, or phrase
 						wordStress = 0;
 					}
 
 					homograph = line;
 					continue;
 				}
+
 				// level >= 3 header
 
 				line.trimLeading('=');
@@ -195,29 +195,54 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 		
 		// append line to outputLine, counting braces and replacing tabs with spaces
 
+		bool brace = false; // to track spaces after '{' which prevent parsing
 
-		while (auto c = line.getc())
+		UChar c;
+		while (c = line.getc())
 		{
-			if (c == '{')++braceCount;
-			else if (c == '}') --braceCount;
-			else if (c == '\t') c = ' ';
+			if (c == '{')
+			{
+				++braceCount;
+				brace = true;
+			}
+			else 
+			{	
+				if (brace)
+				{
+					if (c <= ' ') continue;
+					brace = false;
+				}
+				if (c == '}') --braceCount;
+				else if (c == '\t') c = ' ';
+				else if (c == '&')
+				{
+					if (line.skip_if("quot;")) c = '\"';
+					else if (line.skip_if("lt;")) c = '<';
+					else if (line.skip_if("gt;")) c = '>';
+					else if (line.skip_if("apos;")) c = '\'';
+				}
+			}
 			outputLine += c;
 		}
 
 		if (braceCount) // token is unfinished yet?
 		{
-			outputLine += ' '; // otherwise words can glue together as we removed linebreaks
+			if(!brace) outputLine += ' '; // otherwise words might glue together as we removed linebreaks
 			continue;
 		}
 
 		// the string is complete, parse and write
 
 		u8charser item(outputLine);
-
+		
 		if (item.startsWith(u8"{{илл|")) continue;
 		if (item.startsWith(u8"{{table-")) continue;
 		if (item.startsWith(u8"{{кол|")) continue;
 		if (item.startsWith(u8"{{конец")) continue;
+		if (item.startsWith(u8"{{списки ")) continue;
+		if (item.startsWith(u8"{{перев-блок|")) continue;
+		if (item.startsWith(u8"{{длина ")) continue;
+		if (item == u8"#{{пример|}}") continue;
 		if (item.skip_if(u8"{{Категория"))
 		{	
 			item.seek('|', true);
@@ -231,73 +256,76 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 				if (def.startsWith(u8"язык") && def.contains('=')) continue;
 				ofstreams[CATEGORY] << idWord << '\t' << def << '\n';
 			}
-			if(subHeaderType == CATEGORY) continue;
+			continue;
 		}
 
-		if (subHeaderType)
-		{
-			if (subHeaderType == LINES)
-			{
-				// skip empty ones
-				if (item == u8"От {{этимология:|да}}")  continue;
-				if (item == u8"Происходит от {{этимология:|да}}")  continue;
-			}
-			else
-			{
-				ofstreams[subHeaderType] << outputLine << '\n';
-				continue;
-			}
+		if ((subHeaderType == PHRASES) || (subHeaderType == SAYINGS))
+		{	
+			ofstreams[subHeaderType] << outputLine << '\n';
+			continue;
 		}
 
-		// handle {morpho-ru}
-		if (item.startsWith(u8"{{морфо"))
+		if (subHeaderType == LINES)
 		{
-			item.seek('|', true);
-			u8charser def;
-			while (item)
+			// skip empty ones
+			if (item == u8"От {{этимология:|да}}")  continue;
+			if (item == u8"Происходит от {{этимология:|да}}")  continue;
+			if (item == u8"{{этимология:|да}}")  continue;
+		}
+
+		if (!wordType) // not phrase, proper or abbrev
+		{
+
+
+			// handle {{морфо-ru}}
+			if (item.startsWith(u8"{{морфо"))
 			{
-				item.seek_span({ '|','}' }, true, def);
-				def.trim(' ');
-				if (!def) continue;
-				if (def.startsWith(u8"и=")) continue;
-				int type = 0;
-				if (def.skip_if('-'))
+				item.seek('|', true);
+				u8charser def;
+				while (item)
 				{
-					if (!def.endsWith('-'))
+					item.seek_span({ '|','}' }, true, def);
+					def.trim(' ');
+					if (!def) continue;
+					if (def.startsWith(u8"и=")) continue;
+					int type = 0;
+					if (def.skip_if('-'))
 					{
-						type |= kTypeSuffix;
-						if (def.skip_if('-')) type = kTypeSuffixoid;
-					}
-					else
-					{
-						def.setEnd(def.end() - 1);
-						type |= kTypeInterfix;
-					}
-				}
-				else
-				{
-					if (def.skip_if('+')) type = kTypeEnding;
-					else
-					{
-						if (!def.endsWith('-')) type = kTypeRoot;
+						if (!def.endsWith('-'))
+						{
+							type |= kTypeSuffix;
+							if (def.skip_if('-')) type = kTypeSuffixoid;
+						}
 						else
 						{
 							def.setEnd(def.end() - 1);
-							if (!def.endsWith('-')) type = kTypePrefix;
+							type |= kTypeInterfix;
+						}
+					}
+					else
+					{
+						if (def.skip_if('+')) type = kTypeEnding;
+						else
+						{
+							if (!def.endsWith('-')) type = kTypeRoot;
 							else
 							{
 								def.setEnd(def.end() - 1);
-								type = kTypePrefixoid;
+								if (!def.endsWith('-')) type = kTypePrefix;
+								else
+								{
+									def.setEnd(def.end() - 1);
+									type = kTypePrefixoid;
+								}
 							}
 						}
 					}
+					ofstreams[WORDMORPH] << idWord << '\t' << type << '\t' << def << '\n';
 				}
-				ofstreams[WORDMORPH] << idWord << '\t' << type << '\t' << def << '\n';
+				continue;
 			}
-		}
-		else if (!wordType)
-		{
-			
+
+			// {{morpho-ru}}
 			if (item.startsWith(u8"{{morph"))
 			{
 				item.seek('|', true);
@@ -321,51 +349,73 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 					continue;
 				}
 			}
-			else if (item.startsWith(u8"{{suffix")) wordType = kTypeSuffix;
-			else if (item.startsWith(u8"{{собств")) wordType = kTypeProper;
-			else if (item.startsWith(u8"{{phrase")) wordType = kTypePhrase;
-			else if (item.startsWith(u8"{{Форм") || item.startsWith(u8"{{словоформа")) wordType = kTypeForm;
+		
+			// first, handle parts of speech which have inflection pattern
+
+			if (item.startsWith(u8"{{сущ "))  wordType = kTypeNoun;
+			else if (item.startsWith(u8"{{гл "))  wordType = kTypeVerb;
+			else if (item.startsWith(u8"{{прил "))  wordType = kTypeAdj;
+			else if (item.startsWith(u8"{{мест "))  wordType = kTypePronoun;
+			else if (item.startsWith(u8"{{Мс-"))  wordType = kTypePossess;
+			else if (item.startsWith(u8"{{числ ")) wordType = kTypeNumeral;
+			if (wordType)
+			{
+				item.seek("ru", true);
+				appendInflection(wordType, item, pat);
+			}
 			else
 			{
-
-				if (item.startsWith(u8"{{числ ")) wordType = kTypeNumeral;
-				else if (item.startsWith(u8"{{сущ "))  wordType = kTypeNoun;
-				else if (item.startsWith(u8"{{прил "))  wordType = kTypeAdj;
-				else if (item.startsWith(u8"{{мест "))  wordType = kTypePronoun;
-				else if (item.startsWith(u8"{{Мс-"))  wordType = kTypePossess;
-				else if (item.startsWith(u8"{{гл "))  wordType = kTypeVerb;
-				else if (item.startsWith(u8"{{прич "))  wordType = kTypeParticiple;
-				else if (item.startsWith(u8"{{деепр "))  wordType = kTypeAdvParticiple;
-
+				if (item.startsWith(u8"{{сущ-")) wordType = kTypeNoun;
+				else if (item.startsWith(u8"{{прил-")) wordType = kTypeAdj;
+					
 				if (wordType)
 				{
-					item.seek("ru", true);
-					item.seek_append('|', false, pat);
+					item.seek('|', true);
+					item.seek('|', true);
+					item.skip_if(u8"индекс=");
+					appendInflection(wordType, item, pat);
 				}
-				else
+				else if (item.startsWith(u8"{{числ-"))
 				{
-					if (item.startsWith(u8"{{сущ-")) wordType = kTypeNoun;
-					else if (item.startsWith(u8"{{прил-")) wordType = kTypeAdj;
-			
-					if (wordType)
-					{
-						item.seek('|', true);
-						item.seek('|', true);
-						item.skip_if(u8"индекс=");
-						item.seek_append('|', false, pat);
-					}
-					else if (item.startsWith(u8"{{adv ")) wordType = kTypeAdv;
-					else if (item.startsWith(u8"{{conj ")) wordType = kTypeConj;
-					else if (item.startsWith(u8"{{деепр ")) wordType = kTypeAdvParticiple;
-					else if (item.startsWith(u8"{{part ")) wordType = kTypePart;
-					else if (item.startsWith(u8"{{prep ")) wordType = kTypePrep;
-					else if (item.startsWith(u8"{{interj ")) wordType = kTypeInterj;
-					else if (item.startsWith(u8"{{pred ")) wordType = kTypePred;
+					wordType = kTypeNumeral;
+					item.seek('-', true);
+					appendInflection(wordType, item, pat);
 				}
+				else if (item.startsWith(u8"{{adv ")) wordType = kTypeAdv;
+				else if (item.startsWith(u8"{{conj ")) wordType = kTypeConj;
+				else if (item.startsWith(u8"{{прич ") || 
+					item.startsWith(u8"{{деепр ") ||
+					item.startsWith(u8"{{Форм") || 
+					item.startsWith(u8"{{словоформа")) wordType = kTypeForm;
+				else if (item.startsWith(u8"{{part ")) wordType = kTypePart;
+				else if (item.startsWith(u8"{{prep")) wordType = kTypePrep;
+				else if (item.startsWith(u8"{{interj")) wordType = kTypeInterj;
+				else if (item.startsWith(u8"{{onomatop")) wordType = kTypeSound;
+				else if (item.startsWith(u8"{{pred")) wordType = kTypePred;
+				if (item.startsWith(u8"{{suffix")) wordType = kTypeSuffix;
+				else if (item.startsWith(u8"{{intro")) wordType = kTypeIntro;
+
+			} // end if (!wordType)
+
+		} // end if (!wordType)
+
+		else if (wordType == kTypeProper) // handle inflections for proper names
+		{
+			if (item.startsWith(u8"{{сущ ") || item.startsWith(u8"{{прил "))
+			{
+				item.seek("ru", true);
+				appendInflection(wordType, item, pat);
 			}
+			else if (item.startsWith(u8"{{сущ-") || item.startsWith(u8"{{прил-"))
+			{
+				item.seek('|', true);
+				item.seek('|', true);
+				item.skip_if(u8"индекс=");
+				appendInflection(wordType, item, pat);
+			}
+		} // end if (wordType)...else if(wordType == kTypeProper)
 
-		}
-
+		
 		if (!wordStress)
 		{
 			wordStress = getStressedSyllable(item);
@@ -385,9 +435,6 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 	// write the last homograph (or single one if no level 2 headers, in this case wordHeader is just empty)
 
 	
-		
-
-
 	ofstreams[WORDS] << idWord << '\t' << title << '\t' << homograph;
 	ofstreams[WORDS] << '\t' << wordType << '\t' << pat << '\t' << wordStress << '\n';
 	++idWord;
@@ -395,18 +442,60 @@ inline void ProcessorRu::processText(std::size_t& idWord, std::string_view title
 }
 
 
+
+void wiktcsv::ProcessorRu::appendInflection(int& tpe, u8charser s, std::string& dst) noexcept
+{
+	s.seek_span('|', false, s);
+	if (tpe == kTypeNoun)
+	{
+		bool compound = false;
+		if (s.contains('+')) 
+		{ 
+			s.seek_span(',', false, s);
+			compound = true;
+		}
+		if (s.skip_if(u8"м ")) { dst += "m ina "; }
+		else if (s.skip_if(u8"м,"))	{ dst += "m ina,"; }
+		else if (s.skip_if(u8"мо ")) { dst += "m a "; }
+		else if (s.skip_if(u8"мо,")) { dst += "m a,"; }
+		else if (s.skip_if(u8"ж ")) { dst += "f ina "; }
+		else if (s.skip_if(u8"ж,")) { dst += "f ina,"; }
+		else if (s.skip_if(u8"жо ")) { dst += "f a "; }
+		else if (s.skip_if(u8"жо, ")) { dst += "f a,"; }
+		else if (s.skip_if(u8"с ")) { dst += "n ina "; }
+		else if (s.skip_if(u8"с,")) { dst += "n ina,"; }
+		else if (s.skip_if(u8"со ")) { dst += "n a"; }
+		else if (s.skip_if(u8"со,")) { dst += "n a,"; }
+		else if (s.skip_if(u8"мо-жо")) { dst += "mf "; }
+
+	}
+	else if (tpe == kTypeAdj)
+	{
+		if (s == u8"сравн")
+		{
+			tpe = kTypeForm;
+			return;
+		}
+	}
+
+	dst.append(s);
+	// replace -- with -
+}
+
+
+
 // {{по-слогам|}}
  int wiktcsv::ProcessorRu::getStressedSyllable(u8charser s) noexcept
 {
 	s.trim(' ');
 	
-	if (!s.seek(u8"{{по", true)) return 0;
-	if (!s.skip_if({ U'-',U' ' })) return 0;
-	if (!s.seek(u8"слогам|", true)) return 0;
+	if (s.seek(u8"{{по", true))
+	{
+		if (!s.skip_if({ U'-',U' ' })) return 0;
+		if (!s.seek(u8"слогам|", true)) return 0;
+	}
+	else if (!s.seek(u8"{{слоги|", true)) return 0;
 
-
-
-	
 	 any_of<UChar> pred({U'а',U'е',U'и',U'о',U'у',U'ы',U'э',U'ю',U'я'});
 	int i = 0;
 	while(UChar c = s.getc())
